@@ -11,14 +11,14 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { 
-  Calendar, 
-  ChevronLeft, 
-  ChevronRight, 
-  Plus, 
-  Clock, 
-  User, 
-  Phone, 
+import {
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  Clock,
+  User,
+  Phone,
   Mail,
   Settings,
   X,
@@ -31,12 +31,11 @@ import { es } from "date-fns/locale";
 export default function Scheduling() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [isDayViewOpen, setIsDayViewOpen] = useState(false);
   const [isNewAppointmentOpen, setIsNewAppointmentOpen] = useState(false);
   const [isReasonsDialogOpen, setIsReasonsDialogOpen] = useState(false);
   const [newReason, setNewReason] = useState("");
   const [newReasonColor, setNewReasonColor] = useState("#3b82f6");
-  
+
   // Form state
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -200,8 +199,8 @@ export default function Scheduling() {
                     />
                     <Select value={newReasonColor} onValueChange={setNewReasonColor}>
                       <SelectTrigger className="w-20">
-                        <div 
-                          className="w-4 h-4 rounded-full" 
+                        <div
+                          className="w-4 h-4 rounded-full"
                           style={{ backgroundColor: newReasonColor }}
                         />
                       </SelectTrigger>
@@ -209,8 +208,8 @@ export default function Scheduling() {
                         {reasonColors.map((color) => (
                           <SelectItem key={color} value={color}>
                             <div className="flex items-center gap-2">
-                              <div 
-                                className="w-4 h-4 rounded-full" 
+                              <div
+                                className="w-4 h-4 rounded-full"
                                 style={{ backgroundColor: color }}
                               />
                             </div>
@@ -225,19 +224,19 @@ export default function Scheduling() {
                   <ScrollArea className="h-[200px]">
                     <div className="space-y-2">
                       {reasons.map((reason) => (
-                        <div 
-                          key={reason.id} 
+                        <div
+                          key={reason.id}
                           className="flex items-center justify-between p-2 rounded-lg bg-muted/50"
                         >
                           <div className="flex items-center gap-2">
-                            <div 
-                              className="w-3 h-3 rounded-full" 
+                            <div
+                              className="w-3 h-3 rounded-full"
                               style={{ backgroundColor: reason.color || "#3b82f6" }}
                             />
                             <span>{reason.name}</span>
                           </div>
-                          <Button 
-                            variant="ghost" 
+                          <Button
+                            variant="ghost"
                             size="sm"
                             onClick={() => deleteReason.mutate({ id: reason.id })}
                           >
@@ -267,15 +266,15 @@ export default function Scheduling() {
                 {format(currentMonth, "MMMM yyyy", { locale: es })}
               </CardTitle>
               <div className="flex gap-1">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="icon"
                   onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </Button>
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   size="icon"
                   onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
                 >
@@ -287,15 +286,15 @@ export default function Scheduling() {
               {/* Days header */}
               <div className="grid grid-cols-7 gap-1 mb-2">
                 {["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"].map((day) => (
-                  <div 
-                    key={day} 
+                  <div
+                    key={day}
                     className="text-center text-sm font-medium text-muted-foreground py-2"
                   >
                     {day}
                   </div>
                 ))}
               </div>
-              
+
               {/* Calendar grid */}
               <div className="grid grid-cols-7 gap-1">
                 {emptyDays.map((_, i) => (
@@ -312,13 +311,14 @@ export default function Scheduling() {
                       key={dateKey}
                       onClick={() => {
                         setSelectedDate(day);
-                        setIsDayViewOpen(true);
+                        setIsNewAppointmentOpen(true); // Direct open
+                        resetForm();
                         if (!appointmentTime) setAppointmentTime("09:00");
                       }}
                       className={`
                         h-24 p-1 rounded-lg cursor-pointer transition-all border
-                        ${isSelected 
-                          ? "bg-primary/20 border-primary" 
+                        ${isSelected
+                          ? "bg-primary/20 border-primary"
                           : "bg-muted/30 border-transparent hover:bg-muted/50"
                         }
                         ${isToday ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""}
@@ -337,7 +337,7 @@ export default function Scheduling() {
                             <div
                               key={apt.id}
                               className="text-xs truncate px-1 py-0.5 rounded"
-                              style={{ 
+                              style={{
                                 backgroundColor: reason?.color ? `${reason.color}30` : "#3b82f630",
                                 color: reason?.color || "#3b82f6"
                               }}
@@ -359,11 +359,11 @@ export default function Scheduling() {
             </CardContent>
           </Card>
 
-          {/* Selected day panel */}
-          <Card className="bg-card border-border">
+          {/* Selected day Detail View (Side Panel) */}
+          <Card className="bg-card border-border h-fit">
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-lg">
-                {selectedDate 
+                {selectedDate
                   ? format(selectedDate, "EEEE d 'de' MMMM", { locale: es })
                   : "Selecciona un día"
                 }
@@ -381,6 +381,7 @@ export default function Scheduling() {
                       <DialogTitle>Agendar Nueva Cita</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4">
+                      {/* Form Content */}
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label htmlFor="firstName">Nombre *</Label>
@@ -401,7 +402,7 @@ export default function Scheduling() {
                           />
                         </div>
                       </div>
-                      
+
                       <div className="space-y-2">
                         <Label htmlFor="phone">Teléfono *</Label>
                         <Input
@@ -433,8 +434,8 @@ export default function Scheduling() {
                             {reasons.map((reason) => (
                               <SelectItem key={reason.id} value={reason.id.toString()}>
                                 <div className="flex items-center gap-2">
-                                  <div 
-                                    className="w-3 h-3 rounded-full" 
+                                  <div
+                                    className="w-3 h-3 rounded-full"
                                     style={{ backgroundColor: reason.color || "#3b82f6" }}
                                   />
                                   {reason.name}
@@ -474,13 +475,13 @@ export default function Scheduling() {
                       </div>
 
                       <div className="flex justify-end gap-2">
-                        <Button 
-                          variant="outline" 
+                        <Button
+                          variant="outline"
                           onClick={() => setIsNewAppointmentOpen(false)}
                         >
                           Cancelar
                         </Button>
-                        <Button 
+                        <Button
                           onClick={handleCreateAppointment}
                           disabled={createAppointment.isPending || slotIsFull}
                         >
@@ -492,242 +493,12 @@ export default function Scheduling() {
                 </Dialog>
               )}
             </CardHeader>
-            <CardContent>
-              {selectedDate ? (
-                <ScrollArea className="h-[500px]">
-                  {selectedDateAppointments.length > 0 ? (
-                    <div className="space-y-3">
-                      {selectedDateAppointments
-                        .sort((a, b) => a.appointmentTime.localeCompare(b.appointmentTime))
-                        .map((apt) => {
-                          const reason = getReasonById(apt.reasonId);
-                          return (
-                            <div
-                              key={apt.id}
-                              className="p-3 rounded-lg bg-muted/50 border border-border hover:bg-muted/70 transition-colors"
-                            >
-                              <div className="flex items-start justify-between">
-                                <div className="flex items-center gap-2 mb-2">
-                                  <Clock className="w-4 h-4 text-muted-foreground" />
-                                  <span className="font-medium">{apt.appointmentTime}</span>
-                                  {reason && (
-                                    <Badge 
-                                      variant="outline"
-                                      style={{ 
-                                        borderColor: reason.color || "#3b82f6",
-                                        color: reason.color || "#3b82f6"
-                                      }}
-                                    >
-                                      {reason.name}
-                                    </Badge>
-                                  )}
-                                </div>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-8 w-8"
-                                  onClick={() => deleteAppointment.mutate({ id: apt.id })}
-                                >
-                                  <Trash2 className="w-4 h-4 text-destructive" />
-                                </Button>
-                              </div>
-                              <div className="space-y-1 text-sm">
-                                <div className="flex items-center gap-2">
-                                  <User className="w-4 h-4 text-muted-foreground" />
-                                  <span>{apt.firstName} {apt.lastName}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Phone className="w-4 h-4 text-muted-foreground" />
-                                  <span>{apt.phone}</span>
-                                </div>
-                                {apt.email && (
-                                  <div className="flex items-center gap-2">
-                                    <Mail className="w-4 h-4 text-muted-foreground" />
-                                    <span>{apt.email}</span>
-                                  </div>
-                                )}
-                                {apt.notes && (
-                                  <p className="text-muted-foreground mt-2 text-xs">
-                                    {apt.notes}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <Calendar className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                      <p>No hay citas para este día</p>
-                      <p className="text-sm">Haz clic en "Nueva Cita" para agendar</p>
-                    </div>
-                  )}
-                </ScrollArea>
-              ) : (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Calendar className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p>Selecciona un día en el calendario</p>
-                  <p className="text-sm">para ver o crear citas</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
 
-
-        {/* Day View Modal (Full Screen) */}
-        <Dialog open={isDayViewOpen} onOpenChange={setIsDayViewOpen}>
-          <DialogContent className="max-w-[95vw] w-[95vw] h-[90vh] p-0">
-            <div className="flex flex-col h-full">
-              <div className="flex items-center justify-between border-b border-border px-6 py-4">
-                <div>
-                  <h2 className="text-lg font-semibold">
-                    {selectedDate
-                      ? format(selectedDate, "EEEE d 'de' MMMM yyyy", { locale: es })
-                      : "Vista de día"}
-                  </h2>
-                  <p className="text-sm text-muted-foreground">
-                    Máximo {maxPerSlot} personas por horario • {allowCustomTime ? "Hora manual" : `Slots de ${slotMinutes}m`}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      if (!selectedDate) return;
-                      resetForm();
-                      setIsNewAppointmentOpen(true);
-                    }}
-                    disabled={!selectedDate}
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    Nueva cita
-                  </Button>
-
-                  <Button variant="ghost" size="icon" onClick={() => setIsDayViewOpen(false)}>
-                    <X className="w-5 h-5" />
-                  </Button>
-                </div>
-              </div>
-
-              <ScrollArea className="flex-1">
-                <div className="p-6 space-y-4">
-                  {hours.map((hour) => {
-                    const hourStr = String(hour).padStart(2, "0");
-                    const inHour = selectedDateAppointments.filter((a) =>
-                      a.appointmentTime?.startsWith(`${hourStr}:`)
-                    );
-
-                    const grouped = inHour.reduce(
-                      (acc: Record<string, typeof inHour>, apt) => {
-                        const t = apt.appointmentTime;
-                        if (!acc[t]) acc[t] = [];
-                        acc[t].push(apt);
-                        return acc;
-                      },
-                      {}
-                    );
-
-                    const timeKeys = Object.keys(grouped).sort();
-                    const isSelectedHour = appointmentTime?.startsWith(`${hourStr}:`);
-
-                    return (
-                      <div
-                        key={hour}
-                        className={
-                          "rounded-xl border p-4 bg-muted/20 " +
-                          (isSelectedHour ? "border-primary bg-primary/5" : "border-border")
-                        }
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <button
-                            type="button"
-                            className="flex items-center gap-2 text-sm font-medium hover:underline"
-                            onClick={() => setAppointmentTime(`${hourStr}:00`)}
-                          >
-                            <Clock className="w-4 h-4 text-muted-foreground" />
-                            {hourStr}:00
-                          </button>
-
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              if (!selectedDate) return;
-                              setAppointmentTime(`${hourStr}:00`);
-                              resetForm();
-                              setIsNewAppointmentOpen(true);
-                            }}
-                          >
-                            <Plus className="w-4 h-4 mr-2" />
-                            Agendar
-                          </Button>
-                        </div>
-
-                        {timeKeys.length === 0 ? (
-                          <p className="mt-2 text-xs text-muted-foreground">Sin citas en esta hora</p>
-                        ) : (
-                          <div className="mt-3 space-y-2">
-                            {timeKeys.map((t) => {
-                              const list = grouped[t] ?? [];
-                              const full = list.length >= maxPerSlot;
-
-                              return (
-                                <div
-                                  key={t}
-                                  className={
-                                    "rounded-lg border px-3 py-2 bg-background/60 " +
-                                    (appointmentTime === t ? "border-primary" : "border-border")
-                                  }
-                                >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <button
-                                      type="button"
-                                      className="text-sm font-semibold hover:underline"
-                                      onClick={() => setAppointmentTime(t)}
-                                    >
-                                      {t}
-                                    </button>
-                                    <Badge variant={full ? "destructive" : "outline"}>
-{list.length}/{maxPerSlot}
-                                    </Badge>
-                                  </div>
-
-                                  <div className="mt-2 flex flex-wrap gap-2">
-                                    {list.slice(0, maxPerSlot).map((apt) => (
-                                      <div
-                                        key={apt.id}
-                                        className="text-xs rounded-md bg-muted px-2 py-1 border border-border"
-                                      >
-                                        {apt.firstName} {apt.lastName}
-                                      </div>
-                                    ))}
-                                  </div>
-
-                                  {full && (
-                                    <p className="mt-2 text-xs text-destructive">
-                                      Horario lleno • Probá otro horario
-                                    </p>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </ScrollArea>
-            </div>
-          </DialogContent>
-        </Dialog>
-
+          </CardContent>
+        </Card>
       </div>
-    </DashboardLayout>
+    </div>
+    </DashboardLayout >
   );
 }
 

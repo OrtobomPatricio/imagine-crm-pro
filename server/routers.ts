@@ -10,6 +10,10 @@ import { encryptSecret, decryptSecret, maskSecret } from "./_core/crypto";
 import { sendCloudMessage } from "./whatsapp/cloud";
 import { dispatchIntegrationEvent } from "./_core/integrationDispatch";
 import { eq, desc, sql, and, count } from "drizzle-orm";
+import bcrypt from "bcryptjs";
+import { nanoid } from "nanoid";
+import { sdk } from "./_core/sdk";
+import { ONE_YEAR_MS } from "@shared/const";
 
 export const appRouter = router({
   system: systemRouter,
@@ -31,7 +35,37 @@ export const appRouter = router({
         .where(eq(users.id, ctx.user.id));
 
       return { success: true };
+      return { success: true };
     }),
+
+    loginWithCredentials: publicProcedure
+      .input(z.object({ email: z.string().email(), password: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) return { success: false, error: "Database not available" };
+
+        const user = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+        if (!user[0] || !user[0].password) {
+          return { success: false, error: "Invalid credentials" };
+        }
+
+        const valid = await bcrypt.compare(input.password, user[0].password);
+        if (!valid) {
+          return { success: false, error: "Invalid credentials" };
+        }
+
+        const sessionToken = await sdk.createSessionToken(user[0].openId, {
+          name: user[0].name || "",
+          expiresInMs: ONE_YEAR_MS,
+        });
+
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, sessionToken, { ...cookieOptions, maxAge: ONE_YEAR_MS });
+
+        await db.update(users).set({ lastSignedIn: new Date() }).where(eq(users.id, user[0].id));
+
+        return { success: true };
+      }),
   }),
 
   // --- Pro Settings / Team / RBAC ---
@@ -239,6 +273,40 @@ export const appRouter = router({
 
         await db.update(users).set({ isActive: input.isActive }).where(eq(users.id, input.userId));
         return { success: true } as const;
+      }),
+
+    create: adminProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+        password: z.string().min(6), // Password required for manual creation
+        role: z.enum(["admin", "supervisor", "agent", "viewer"]), // Owner cannot be created this way
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+
+        // Check if email already exists
+        const existing = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+        if (existing.length > 0) {
+          throw new Error("User with this email already exists");
+        }
+
+        const hashedPassword = await bcrypt.hash(input.password, 10);
+        const openId = `local_${nanoid(16)}`; // Generate unique openId for local users
+
+        const result = await db.insert(users).values({
+          openId,
+          name: input.name,
+          email: input.email,
+          password: hashedPassword,
+          role: input.role,
+          loginMethod: "credentials",
+          isActive: true,
+          hasSeenTour: false,
+        });
+
+        return { id: result[0].insertId, success: true };
       }),
   }),
 
@@ -1123,7 +1191,8 @@ export const appRouter = router({
     sendMessage: permissionProcedure("chat.send")
       .input(z.object({
         conversationId: z.number(),
-        whatsappNumberId: z.number(),
+        whatsappNumberId: z.number().optional(),
+        facebookPageId: z.number().optional(),
         messageType: z.enum(['text', 'image', 'video', 'audio', 'document', 'location', 'sticker', 'contact', 'template']),
         content: z.string().optional(),
         mediaUrl: z.string().optional(),
@@ -1136,6 +1205,8 @@ export const appRouter = router({
         templateName: z.string().optional(),
         templateLanguage: z.string().optional(),
         templateComponents: z.array(z.any()).optional(),
+        // Facebook specific
+        isFacebook: z.boolean().optional(),
       }))
       .mutation(async ({ input }) => {
         const db = await getDb();
@@ -1143,9 +1214,20 @@ export const appRouter = router({
 
         const now = new Date();
 
+        // Lookup conversation to determine channel
+        const convRows = await db.select()
+          .from(conversations)
+          .where(eq(conversations.id, input.conversationId))
+          .limit(1);
+        const conv = convRows[0];
+        if (!conv) throw new Error("Conversation not found");
+
+        const isFacebook = conv.channel === 'facebook';
+
         const insertRes = await db.insert(chatMessages).values({
           conversationId: input.conversationId,
-          whatsappNumberId: input.whatsappNumberId,
+          whatsappNumberId: isFacebook ? null : (input.whatsappNumberId || conv.whatsappNumberId),
+          facebookPageId: isFacebook ? (input.facebookPageId || conv.facebookPageId) : null,
           direction: 'outbound',
           messageType: input.messageType,
           content: input.content ?? (input.templateName ? `Template: ${input.templateName}` : null),
@@ -1165,155 +1247,207 @@ export const appRouter = router({
           .set({ lastMessageAt: now })
           .where(eq(conversations.id, input.conversationId));
 
-        // Lookup conversation recipient
-        const convRows = await db.select()
-          .from(conversations)
-          .where(eq(conversations.id, input.conversationId))
-          .limit(1);
-        const conv = convRows[0];
+        if (isFacebook) {
+          // --- FACEBOOK SEND LOGIC ---
+          const pageId = input.facebookPageId || conv.facebookPageId;
+          if (!pageId) throw new Error("Falta facebookPageId");
 
-        // If conversation missing, keep it queued
-        if (!conv) {
-          return { id, success: true, queued: true } as const;
-        }
+          // Get Page Access Token
+          const { facebookPages } = await import("../drizzle/schema");
+          const pageRows = await db.select().from(facebookPages).where(eq(facebookPages.id, pageId)).limit(1);
+          const page = pageRows[0];
 
-        // Lookup WhatsApp API connection
-        const connRows = await db.select()
-          .from(whatsappConnections)
-          .where(eq(whatsappConnections.whatsappNumberId, input.whatsappNumberId))
-          .limit(1);
-        const conn = connRows[0];
+          if (!page || !page.accessToken) throw new Error("Página de Facebook no conectada o sin token");
 
-        // If not connected via API, keep it pending (you can build a worker later)
-        if (!conn || conn.connectionType !== 'api' || !conn.isConnected) {
-          return { id, success: true, queued: true } as const;
-        }
+          const accessToken = decryptSecret(page.accessToken) || page.accessToken;
+          if (!accessToken) throw new Error("Error desencriptando token de Facebook");
 
-        const token = decryptSecret(conn.accessToken ?? '') ?? (conn.accessToken ?? null);
-        if (!token) {
-          await db.update(chatMessages)
-            .set({ status: 'failed', errorMessage: 'Missing accessToken', failedAt: now })
-            .where(eq(chatMessages.id, id));
-          throw new Error('WhatsApp API no configurada (accessToken faltante)');
-        }
-        if (!conn.phoneNumberId) {
-          await db.update(chatMessages)
-            .set({ status: 'failed', errorMessage: 'Missing phoneNumberId', failedAt: now })
-            .where(eq(chatMessages.id, id));
-          throw new Error('WhatsApp API no configurada (phoneNumberId faltante)');
-        }
+          const { sendFacebookMessage } = await import("./_core/facebook");
 
-        // Build Cloud API payload
-        const mt = input.messageType;
-        let payload: any;
-        let waMessageId: string | undefined;
+          // Construct message payload
+          let messagePayload: any = {};
 
-        try {
-          if (mt === 'template') {
-            if (!input.templateName) throw new Error("Missing templateName");
-            const { sendCloudTemplate } = await import("./whatsapp/cloud");
-            const res = await sendCloudTemplate({
-              accessToken: token,
-              phoneNumberId: conn.phoneNumberId,
-              to: conv.contactPhone,
-              templateName: input.templateName,
-              languageCode: input.templateLanguage || "es",
-              components: input.templateComponents,
-            });
-            waMessageId = res.messageId;
-
+          if (input.messageType === 'text') {
+            if (!input.content) throw new Error("Mensaje vacío");
+            messagePayload = { text: input.content };
+          } else if (['image', 'video', 'audio', 'file'].includes(input.messageType)) {
+            if (!input.mediaUrl) throw new Error("Falta URL de multimedia");
+            messagePayload = {
+              attachment: {
+                type: input.messageType === 'document' ? 'file' : input.messageType,
+                payload: { url: input.mediaUrl, is_reusable: true }
+              }
+            };
           } else {
-            // Standard media/text
-            if (mt === 'text') {
-              const body = (input.content ?? '').trim();
-              if (!body) throw new Error('El mensaje de texto está vacío');
-              payload = { type: 'text', body };
-            } else if (mt === 'image' || mt === 'video' || mt === 'audio') {
-              if (!input.mediaUrl) throw new Error('Falta mediaUrl');
-              payload = { type: mt, link: input.mediaUrl, caption: input.content || undefined };
-            } else if (mt === 'document') {
-              if (!input.mediaUrl) throw new Error('Falta mediaUrl');
-              payload = {
-                type: 'document',
-                link: input.mediaUrl,
-                caption: input.content || undefined,
-                filename: input.mediaName || undefined,
-              };
-            } else if (mt === 'location') {
-              if (input.latitude == null || input.longitude == null) throw new Error('Faltan coordenadas');
-              payload = {
-                type: 'location',
-                latitude: input.latitude,
-                longitude: input.longitude,
-                name: input.locationName || undefined,
-              };
-            } else if (mt === 'sticker') {
-              if (!input.mediaUrl) throw new Error('Falta mediaUrl');
-              payload = { type: 'sticker', link: input.mediaUrl };
-            } else if (mt === 'contact') {
-              const vcard = (input.content ?? '').trim();
-              if (!vcard) throw new Error('Falta vCard para contacto');
-              payload = { type: 'contact', vcard };
-            }
-
-            // Send standard message
-            const res = await sendCloudMessage({
-              accessToken: token,
-              phoneNumberId: conn.phoneNumberId,
-              to: conv.contactPhone,
-              payload,
-            });
-            waMessageId = res.messageId;
+            throw new Error(`Tipo de mensaje no soportado para Facebook: ${input.messageType}`);
           }
 
-          // Update DB on success
-          await db.update(chatMessages)
-            .set({
-              status: 'sent',
-              whatsappMessageId: waMessageId,
-              sentAt: now,
-              errorMessage: null,
-              failedAt: null,
-            })
-            .where(eq(chatMessages.id, id));
+          try {
+            const res = await sendFacebookMessage({
+              accessToken,
+              recipientId: conv.contactPhone, // In FB, contactPhone holds the PSID
+              message: messagePayload
+            });
 
-          // Bump counters
-          await db.update(whatsappNumbers)
-            .set({
-              messagesSentToday: sql`${whatsappNumbers.messagesSentToday} + 1`,
-              totalMessagesSent: sql`${whatsappNumbers.totalMessagesSent} + 1`,
-              lastConnected: now,
-            })
-            .where(eq(whatsappNumbers.id, input.whatsappNumberId));
+            await db.update(chatMessages)
+              .set({
+                status: 'sent',
+                facebookMessageId: res.messageId,
+                sentAt: now,
+              })
+              .where(eq(chatMessages.id, id));
 
-          void dispatchIntegrationEvent({
-            whatsappNumberId: input.whatsappNumberId,
-            event: "message_sent",
-            data: {
-              conversationId: input.conversationId,
-              chatMessageId: id,
-              whatsappMessageId: waMessageId,
-              to: conv.contactPhone,
-              messageType: mt,
-              content: input.content ?? null,
-              mediaUrl: input.mediaUrl ?? null,
-            },
-          });
+            return { id, success: true, sent: true };
+          } catch (err: any) {
+            await db.update(chatMessages)
+              .set({ status: 'failed', errorMessage: err.message, failedAt: now })
+              .where(eq(chatMessages.id, id));
+            throw err;
+          }
+        } else {
+          // --- WHATSAPP SEND LOGIC ---
+          const whatsappNumberId = input.whatsappNumberId || conv.whatsappNumberId;
+          if (!whatsappNumberId) throw new Error("Falta whatsappNumberId");
 
-          return { id, success: true, sent: true, whatsappMessageId: waMessageId } as const;
+          // Lookup WhatsApp API connection
+          const connRows = await db.select()
+            .from(whatsappConnections)
+            .where(eq(whatsappConnections.whatsappNumberId, whatsappNumberId))
+            .limit(1);
+          const conn = connRows[0];
 
-        } catch (e: any) {
-          const message = e?.message ? String(e.message) : 'Failed to send';
-          await db.update(chatMessages)
-            .set({ status: 'failed', errorMessage: message, failedAt: now })
-            .where(eq(chatMessages.id, id));
-          throw new Error(message);
+          // If not connected via API, keep it pending
+          if (!conn || conn.connectionType !== 'api' || !conn.isConnected) {
+            return { id, success: true, queued: true } as const;
+          }
+
+          const token = decryptSecret(conn.accessToken ?? '') ?? (conn.accessToken ?? null);
+          if (!token) {
+            await db.update(chatMessages)
+              .set({ status: 'failed', errorMessage: 'Missing accessToken', failedAt: now })
+              .where(eq(chatMessages.id, id));
+            throw new Error('WhatsApp API no configurada (accessToken faltante)');
+          }
+          if (!conn.phoneNumberId) {
+            await db.update(chatMessages)
+              .set({ status: 'failed', errorMessage: 'Missing phoneNumberId', failedAt: now })
+              .where(eq(chatMessages.id, id));
+            throw new Error('WhatsApp API no configurada (phoneNumberId faltante)');
+          }
+
+          // Build Cloud API payload
+          const mt = input.messageType;
+          let payload: any;
+          let waMessageId: string | undefined;
+
+          try {
+            if (mt === 'template') {
+              if (!input.templateName) throw new Error("Missing templateName");
+              const { sendCloudTemplate } = await import("./whatsapp/cloud");
+              const res = await sendCloudTemplate({
+                accessToken: token,
+                phoneNumberId: conn.phoneNumberId,
+                to: conv.contactPhone,
+                templateName: input.templateName,
+                languageCode: input.templateLanguage || "es",
+                components: input.templateComponents,
+              });
+              waMessageId = res.messageId;
+
+            } else {
+              // Standard media/text
+              if (mt === 'text') {
+                const body = (input.content ?? '').trim();
+                if (!body) throw new Error('El mensaje de texto está vacío');
+                payload = { type: 'text', body };
+              } else if (mt === 'image' || mt === 'video' || mt === 'audio') {
+                if (!input.mediaUrl) throw new Error('Falta mediaUrl');
+                payload = { type: mt, link: input.mediaUrl, caption: input.content || undefined };
+              } else if (mt === 'document') {
+                if (!input.mediaUrl) throw new Error('Falta mediaUrl');
+                payload = {
+                  type: 'document',
+                  link: input.mediaUrl,
+                  caption: input.content || undefined,
+                  filename: input.mediaName || undefined,
+                };
+              } else if (mt === 'location') {
+                if (input.latitude == null || input.longitude == null) throw new Error('Faltan coordenadas');
+                payload = {
+                  type: 'location',
+                  latitude: input.latitude,
+                  longitude: input.longitude,
+                  name: input.locationName || undefined,
+                };
+              } else if (mt === 'sticker') {
+                if (!input.mediaUrl) throw new Error('Falta mediaUrl');
+                payload = { type: 'sticker', link: input.mediaUrl };
+              } else if (mt === 'contact') {
+                const vcard = (input.content ?? '').trim();
+                if (!vcard) throw new Error('Falta vCard para contacto');
+                payload = { type: 'contact', vcard };
+              }
+
+              // Send standard message
+              const res = await sendCloudMessage({
+                accessToken: token,
+                phoneNumberId: conn.phoneNumberId,
+                to: conv.contactPhone,
+                payload,
+              });
+              waMessageId = res.messageId;
+            }
+
+            // Update DB on success
+            await db.update(chatMessages)
+              .set({
+                status: 'sent',
+                whatsappMessageId: waMessageId,
+                sentAt: now,
+                errorMessage: null,
+                failedAt: null,
+              })
+              .where(eq(chatMessages.id, id));
+
+            // Bump counters
+            await db.update(whatsappNumbers)
+              .set({
+                messagesSentToday: sql`${whatsappNumbers.messagesSentToday} + 1`,
+                totalMessagesSent: sql`${whatsappNumbers.totalMessagesSent} + 1`,
+                lastConnected: now,
+              })
+              .where(eq(whatsappNumbers.id, whatsappNumberId));
+
+            void dispatchIntegrationEvent({
+              whatsappNumberId: whatsappNumberId,
+              event: "message_sent",
+              data: {
+                conversationId: input.conversationId,
+                chatMessageId: id,
+                whatsappMessageId: waMessageId,
+                to: conv.contactPhone,
+                messageType: mt,
+                content: input.content ?? null,
+                mediaUrl: input.mediaUrl ?? null,
+              },
+            });
+
+            return { id, success: true, sent: true, whatsappMessageId: waMessageId } as const;
+
+          } catch (e: any) {
+            const message = e?.message ? String(e.message) : 'Failed to send';
+            await db.update(chatMessages)
+              .set({ status: 'failed', errorMessage: message, failedAt: now })
+              .where(eq(chatMessages.id, id));
+            throw new Error(message);
+          }
         }
       }),
 
     createConversation: permissionProcedure("chat.send")
       .input(z.object({
-        whatsappNumberId: z.number(),
+        whatsappNumberId: z.number().optional(),
+        facebookPageId: z.number().optional(),
         contactPhone: z.string(),
         contactName: z.string().optional(),
         leadId: z.number().optional(),
@@ -1322,7 +1456,27 @@ export const appRouter = router({
         const db = await getDb();
         if (!db) throw new Error("Database not available");
 
-        const result = await db.insert(conversations).values(input);
+        const channel = input.facebookPageId ? 'facebook' : 'whatsapp';
+
+        // Validate required ID based on channel
+        if (channel === 'whatsapp' && !input.whatsappNumberId) {
+          throw new Error("Falta whatsappNumberId");
+        }
+        if (channel === 'facebook' && !input.facebookPageId) {
+          throw new Error("Falta facebookPageId");
+        }
+
+        const result = await db.insert(conversations).values({
+          channel,
+          whatsappNumberId: input.whatsappNumberId ?? null,
+          facebookPageId: input.facebookPageId ?? null,
+          contactPhone: input.contactPhone,
+          contactName: input.contactName,
+          leadId: input.leadId,
+          lastMessageAt: new Date(),
+          status: 'active',
+        } as any);
+
         return { id: result[0].insertId, success: true };
       }),
   }),
@@ -1459,6 +1613,63 @@ export const appRouter = router({
       }),
   }),
 
+
+  // Facebook Router
+  facebook: router({
+    listPages: permissionProcedure("settings.view").query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      const { facebookPages } = await import("../drizzle/schema"); // Lazy load or assume verified
+      return db.select().from(facebookPages).orderBy(desc(facebookPages.createdAt));
+    }),
+
+    connectPage: permissionProcedure("settings.manage")
+      .input(z.object({
+        pageId: z.string(),
+        name: z.string(),
+        accessToken: z.string(),
+        pictureUrl: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+        const { facebookPages } = await import("../drizzle/schema");
+
+        const existing = await db.select().from(facebookPages).where(eq(facebookPages.pageId, input.pageId)).limit(1);
+
+        if (existing[0]) {
+          await db.update(facebookPages).set({
+            name: input.name,
+            accessToken: encryptSecret(input.accessToken),
+            pictureUrl: input.pictureUrl,
+            isConnected: true,
+            updatedAt: new Date(),
+          }).where(eq(facebookPages.id, existing[0].id));
+        } else {
+          await db.insert(facebookPages).values({
+            pageId: input.pageId,
+            name: input.name,
+            accessToken: encryptSecret(input.accessToken),
+            pictureUrl: input.pictureUrl,
+            isConnected: true,
+          });
+        }
+        return { success: true };
+      }),
+
+    disconnectPage: permissionProcedure("settings.manage")
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+        const { facebookPages } = await import("../drizzle/schema");
+
+        await db.update(facebookPages)
+          .set({ isConnected: false, accessToken: null })
+          .where(eq(facebookPages.id, input.id));
+        return { success: true };
+      }),
+  }),
 
   // Automations router
   automations: router({

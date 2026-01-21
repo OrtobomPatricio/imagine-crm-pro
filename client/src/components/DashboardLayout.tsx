@@ -213,7 +213,7 @@ function DashboardLayoutContent({
   return (
     <>
       <div
-        className="relative h-screen hidden md:block shrink-0"
+        className="sticky top-0 h-screen hidden md:block shrink-0"
         style={{ width: `${sidebarWidth}px` }}
         ref={sidebarRef}
       >

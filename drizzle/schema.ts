@@ -8,6 +8,7 @@ export const users = mysqlTable("users", {
   openId: varchar("openId", { length: 64 }).notNull().unique(),
   name: text("name"),
   email: varchar("email", { length: 320 }),
+  password: varchar("password", { length: 255 }), // For native credential login
   loginMethod: varchar("loginMethod", { length: 64 }),
   // Pro roles: owner/admin/supervisor/agent/viewer
   role: mysqlEnum("role", ["owner", "admin", "supervisor", "agent", "viewer"]).default("agent").notNull(),
@@ -239,8 +240,10 @@ export type InsertAppointment = typeof appointments.$inferInsert;
  */
 export const conversations = mysqlTable("conversations", {
   id: int("id").autoincrement().primaryKey(),
-  whatsappNumberId: int("whatsappNumberId").notNull(),
-  contactPhone: varchar("contactPhone", { length: 20 }).notNull(),
+  channel: mysqlEnum("channel", ["whatsapp", "facebook"]).default("whatsapp").notNull(),
+  whatsappNumberId: int("whatsappNumberId"), // Nullable for FB
+  facebookPageId: int("facebookPageId"), // Nullable for WA
+  contactPhone: varchar("contactPhone", { length: 50 }).notNull(), // Now generic (phone or PSID)
   contactName: varchar("contactName", { length: 200 }),
   leadId: int("leadId"),
   assignedToId: int("assignedToId"),
@@ -260,7 +263,8 @@ export type InsertConversation = typeof conversations.$inferInsert;
 export const chatMessages = mysqlTable("chat_messages", {
   id: int("id").autoincrement().primaryKey(),
   conversationId: int("conversationId").notNull(),
-  whatsappNumberId: int("whatsappNumberId").notNull(),
+  whatsappNumberId: int("whatsappNumberId"),
+  facebookPageId: int("facebookPageId"),
   direction: mysqlEnum("direction", ["inbound", "outbound"]).notNull(),
   messageType: mysqlEnum("messageType", ["text", "image", "video", "audio", "document", "location", "sticker", "contact", "template"]).default("text").notNull(),
   content: text("content"),
@@ -274,6 +278,7 @@ export const chatMessages = mysqlTable("chat_messages", {
   errorMessage: text("errorMessage"),
   failedAt: timestamp("failedAt"),
   whatsappMessageId: varchar("whatsappMessageId", { length: 100 }),
+  facebookMessageId: varchar("facebookMessageId", { length: 100 }),
   sentAt: timestamp("sentAt"),
   deliveredAt: timestamp("deliveredAt"),
   readAt: timestamp("readAt"),
@@ -305,6 +310,24 @@ export const whatsappConnections = mysqlTable("whatsapp_connections", {
 export type WhatsappConnection = typeof whatsappConnections.$inferSelect;
 export type InsertWhatsappConnection = typeof whatsappConnections.$inferInsert;
 
+
+/**
+ * Facebook Pages
+ */
+export const facebookPages = mysqlTable("facebook_pages", {
+  id: int("id").autoincrement().primaryKey(),
+  pageId: varchar("pageId", { length: 100 }).notNull().unique(),
+  name: varchar("name", { length: 200 }).notNull(),
+  accessToken: text("accessToken"), // Long-lived token
+  isConnected: boolean("isConnected").default(true).notNull(),
+  pictureUrl: varchar("pictureUrl", { length: 500 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type FacebookPage = typeof facebookPages.$inferSelect;
+export type InsertFacebookPage = typeof facebookPages.$inferInsert;
+
 /**
  * Automations / Workflows
  */
@@ -323,3 +346,4 @@ export const workflows = mysqlTable("workflows", {
 
 export type Workflow = typeof workflows.$inferSelect;
 export type InsertWorkflow = typeof workflows.$inferInsert;
+

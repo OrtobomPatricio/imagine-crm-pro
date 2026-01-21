@@ -1,3 +1,5 @@
+import { trpc } from "@/lib/trpc";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,17 +13,28 @@ import { useState } from "react";
 export default function Login() {
   const { theme, toggleTheme } = useTheme();
   const canDevLogin = import.meta.env.VITE_DEV_BYPASS_AUTH === "1";
-  const [isRegistering, setIsRegistering] = useState(false);
+  // const [isRegistering, setIsRegistering] = useState(false); // No registration for now
   const [formData, setFormData] = useState({
-    name: "",
     email: "",
     password: "",
   });
 
+  const login = trpc.auth.loginWithCredentials.useMutation({
+    onSuccess: () => {
+      // Reload to hydrate session
+      window.location.href = "/";
+    },
+    onError: (e) => toast.error(e.message || "Credenciales inválidas"),
+  });
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Redirect to OAuth login
-    window.location.href = getLoginUrl();
+    if (!formData.email || !formData.password) {
+      toast.error("Ingresá email y contraseña");
+      return;
+    }
+
+    login.mutate(formData);
   };
 
   const handleOAuthLogin = () => {
@@ -83,13 +96,10 @@ export default function Login() {
           <Card className="glass-card border-border/50 shadow-2xl shadow-purple-500/10">
             <CardHeader className="text-center pb-4">
               <CardTitle className="text-xl">
-                {isRegistering ? "Crear Cuenta" : "Iniciar Sesión"}
+                Iniciar Sesión
               </CardTitle>
               <CardDescription>
-                {isRegistering
-                  ? "Completa tus datos para registrarte"
-                  : "Accede a tu cuenta para continuar"
-                }
+                Accede a tu cuenta para continuar
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -157,22 +167,6 @@ export default function Login() {
 
               {/* Email Form */}
               <form onSubmit={handleSubmit} className="space-y-4">
-                {isRegistering && (
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Nombre</Label>
-                    <div className="relative">
-                      <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        id="name"
-                        placeholder="Tu nombre"
-                        className="pl-10 bg-card/50 border-border/50 focus:border-primary"
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                )}
-
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
                   <div className="relative">
@@ -207,24 +201,11 @@ export default function Login() {
                   type="submit"
                   className="w-full h-11 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white shadow-lg shadow-purple-500/25 transition-all duration-300 hover:shadow-xl hover:shadow-purple-500/30"
                 >
-                  {isRegistering ? "Crear Cuenta" : "Iniciar Sesión"}
+                  Iniciar Sesión
                   <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </form>
 
-              {/* Toggle Register/Login */}
-              <div className="text-center text-sm">
-                <span className="text-muted-foreground">
-                  {isRegistering ? "¿Ya tienes cuenta?" : "¿No tienes cuenta?"}
-                </span>{" "}
-                <button
-                  type="button"
-                  className="text-primary hover:underline font-medium"
-                  onClick={() => setIsRegistering(!isRegistering)}
-                >
-                  {isRegistering ? "Inicia sesión" : "Regístrate"}
-                </button>
-              </div>
             </CardContent>
           </Card>
 

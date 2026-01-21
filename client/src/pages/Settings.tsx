@@ -28,7 +28,17 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { useEffect, useMemo, useState } from "react";
 import { usePermissions } from "@/_core/hooks/usePermissions";
-import { AlertCircle, Key } from "lucide-react";
+import { AlertCircle, Key, Plus, Facebook } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import FacebookSettings from "@/components/FacebookSettings";
 
 const TZ_OPTIONS = [
   "America/Asuncion",
@@ -218,7 +228,8 @@ function SettingsContent() {
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="team">Usuarios</TabsTrigger>
           <TabsTrigger value="schedule">Agendamiento</TabsTrigger>
-          <TabsTrigger value="connections">Conexiones</TabsTrigger>
+          <TabsTrigger value="connections">Conexiones API</TabsTrigger>
+          <TabsTrigger value="facebook">Facebook</TabsTrigger>
           <TabsTrigger value="perms" disabled={role !== "owner"}>Permisos</TabsTrigger>
         </TabsList>
 
@@ -376,13 +387,20 @@ function SettingsContent() {
           <ConnectionsSettings />
         </TabsContent>
 
+        <TabsContent value="facebook" className="space-y-4">
+          <FacebookSettings />
+        </TabsContent>
+
         <TabsContent value="team" className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Usuarios y roles</CardTitle>
-              <CardDescription>
-                Asigná Admin, Supervisor, Agente o Solo lectura
-              </CardDescription>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Usuarios y roles</CardTitle>
+                <CardDescription>
+                  Asigná Admin, Supervisor, Agente o Solo lectura
+                </CardDescription>
+              </div>
+              <AddUserDialog onSuccess={() => teamQuery.refetch()} />
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-3">
@@ -438,27 +456,15 @@ function SettingsContent() {
             <CardHeader>
               <CardTitle>Permisos avanzados</CardTitle>
               <CardDescription>
-                Solo el owner puede editar esto. Usa JSON con wildcard (ej: chat.*)
+                Define qué puede hacer cada rol en el sistema.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid gap-2">
-                <Label>Matriz de permisos</Label>
-                <Textarea
-                  value={matrixText}
-                  onChange={(e) => setMatrixText(e.target.value)}
-                  className="min-h-[340px] font-mono text-xs"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Tip: owner: ["*"]  | admin: ["settings.*", "users.*"]
-                </p>
-              </div>
-
-              <div className="flex justify-end">
-                <Button onClick={saveMatrix} disabled={updatePerms.isPending}>
-                  {updatePerms.isPending ? "Guardando..." : "Guardar permisos"}
-                </Button>
-              </div>
+              <PermissionsMatrixEditor
+                initialMatrix={initialMatrix}
+                onSave={(m) => updatePerms.mutate({ permissionsMatrix: m })}
+                isLoading={updatePerms.isPending}
+              />
             </CardContent>
           </Card>
         </TabsContent>
@@ -641,6 +647,398 @@ function CredentialForm({ numberId, onSubmit, isLoading }: { numberId: number, o
           {isLoading ? "Guardando..." : "Guardar Credenciales"}
         </Button>
       </DialogFooter>
+    </div>
+  );
+}
+
+function AddUserDialog({ onSuccess }: { onSuccess: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    password: "",
+    role: "agent" as "admin" | "supervisor" | "agent" | "viewer",
+  });
+
+  const createUser = trpc.team.create.useMutation({
+    onSuccess: () => {
+      toast.success("Usuario creado exitosamente");
+      setOpen(false);
+      setFormData({ name: "", email: "", password: "", role: "agent" });
+      onSuccess();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const handleSubmit = () => {
+    if (!formData.name || !formData.email || !formData.password) {
+      toast.error("Complete todos los campos requeridos");
+      return;
+    }
+    createUser.mutate(formData);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <Plus className="w-4 h-4 mr-2" />
+          Agregar Usuario
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nuevo Usuario</DialogTitle>
+          <DialogDescription>
+            Creá un nuevo acceso para tu equipo.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <div className="grid gap-2">
+            <Label htmlFor="name">Nombre</Label>
+            <Input
+              id="name"
+              value={formData.name}
+              onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))}
+              placeholder="Juan Pérez"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData(p => ({ ...p, email: e.target.value }))}
+              placeholder="juan@empresa.com"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="password">Contraseña</Label>
+            <Input
+              id="password"
+              type="password"
+              value={formData.password}
+              onChange={(e) => setFormData(p => ({ ...p, password: e.target.value }))}
+              placeholder="••••••••"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>Rol</Label>
+            <Select
+              value={formData.role}
+              onValueChange={(v) => setFormData(p => ({ ...p, role: v as any }))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="supervisor">Supervisor</SelectItem>
+                <SelectItem value="agent">Agente</SelectItem>
+                <SelectItem value="viewer">Solo lectura</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={handleSubmit} disabled={createUser.isPending}>
+            {createUser.isPending ? "Creando..." : "Crear Usuario"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PermissionsMatrixEditor({
+  initialMatrix,
+  onSave,
+  isLoading
+}: {
+  initialMatrix: Record<string, string[]>,
+  onSave: (m: Record<string, string[]>) => void,
+  isLoading: boolean
+}) {
+  const [matrix, setMatrix] = useState(initialMatrix);
+
+  // Sync state if initial changes (e.g. fetch finishes)
+  useEffect(() => {
+    setMatrix(initialMatrix);
+  }, [initialMatrix]);
+
+  const ROLES = ["admin", "supervisor", "agent", "viewer"] as const;
+  const DOMAINS = [
+    { key: "dashboard", label: "Dashboard" },
+    { key: "leads", label: "Leads" },
+    { key: "kanban", label: "Kanban" },
+    { key: "chat", label: "Chat" },
+    { key: "scheduling", label: "Agenda" },
+    { key: "monitoring", label: "Monitoreo" },
+    { key: "analytics", label: "Analíticas" },
+    { key: "reports", label: "Reportes" },
+    { key: "integrations", label: "Integraciones" },
+    { key: "settings", label: "Configuración" },
+    { key: "users", label: "Usuarios" },
+  ];
+
+  const togglePermission = (role: string, domainKey: string, checked: boolean) => {
+    setMatrix(prev => {
+      const current = new Set(prev[role] || []);
+      const wildcard = `${domainKey}.*`;
+      const view = `${domainKey}.view`;
+
+      if (checked) {
+        current.add(wildcard);
+        current.delete(view);
+      } else {
+        current.delete(wildcard);
+        current.delete(view);
+      }
+
+      return { ...prev, [role]: Array.from(current) };
+    });
+  };
+
+  const hasPermission = (role: string, domainKey: string) => {
+    const permissions = matrix[role] || [];
+    return permissions.includes(`${domainKey}.*`) || permissions.includes("*");
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[150px]">Módulo</TableHead>
+              {ROLES.map(role => (
+                <TableHead key={role} className="text-center capitalize">
+                  {role === 'agent' ? 'Agente' : role}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {DOMAINS.map((domain) => (
+              <TableRow key={domain.key}>
+                <TableCell className="font-medium">{domain.label}</TableCell>
+                {ROLES.map(role => (
+                  <TableCell key={role} className="text-center flex align-center items-center justify-center">
+                    <div className="flex justify-center">
+                      <Checkbox
+                        checked={hasPermission(role, domain.key)}
+                        onCheckedChange={(c) => togglePermission(role, domain.key, c as boolean)}
+                      />
+                    </div>
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="flex justify-end">
+        <Button onClick={() => onSave(matrix)} disabled={isLoading}>
+          {isLoading ? "Guardando..." : "Guardar Cambios"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AddUserDialog({ onSuccess }: { onSuccess: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    password: "",
+    role: "agent" as "admin" | "supervisor" | "agent" | "viewer",
+  });
+
+  const createUser = trpc.team.create.useMutation({
+    onSuccess: () => {
+      toast.success("Usuario creado exitosamente");
+      setOpen(false);
+      setFormData({ name: "", email: "", password: "", role: "agent" });
+      onSuccess();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const handleSubmit = () => {
+    if (!formData.name || !formData.email || !formData.password) {
+      toast.error("Complete todos los campos requeridos");
+      return;
+    }
+    createUser.mutate(formData);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <Plus className="w-4 h-4 mr-2" />
+          Agregar Usuario
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nuevo Usuario</DialogTitle>
+          <DialogDescription>
+            Creá un nuevo acceso para tu equipo.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          <div className="grid gap-2">
+            <Label htmlFor="name">Nombre</Label>
+            <Input
+              id="name"
+              value={formData.name}
+              onChange={(e) => setFormData(p => ({ ...p, name: e.target.value }))}
+              placeholder="Juan Pérez"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              value={formData.email}
+              onChange={(e) => setFormData(p => ({ ...p, email: e.target.value }))}
+              placeholder="juan@empresa.com"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="password">Contraseña</Label>
+            <Input
+              id="password"
+              type="password"
+              value={formData.password}
+              onChange={(e) => setFormData(p => ({ ...p, password: e.target.value }))}
+              placeholder="••••••••"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label>Rol</Label>
+            <Select
+              value={formData.role}
+              onValueChange={(v) => setFormData(p => ({ ...p, role: v as any }))}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="supervisor">Supervisor</SelectItem>
+                <SelectItem value="agent">Agente</SelectItem>
+                <SelectItem value="viewer">Solo lectura</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={handleSubmit} disabled={createUser.isPending}>
+            {createUser.isPending ? "Creando..." : "Crear Usuario"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PermissionsMatrixEditor({
+  initialMatrix,
+  onSave,
+  isLoading
+}: {
+  initialMatrix: Record<string, string[]>,
+  onSave: (m: Record<string, string[]>) => void,
+  isLoading: boolean
+}) {
+  const [matrix, setMatrix] = useState(initialMatrix);
+
+  // Sync state if initial changes (e.g. fetch finishes)
+  useEffect(() => {
+    setMatrix(initialMatrix);
+  }, [initialMatrix]);
+
+  const ROLES = ["admin", "supervisor", "agent", "viewer"] as const;
+  const DOMAINS = [
+    { key: "dashboard", label: "Dashboard" },
+    { key: "leads", label: "Leads" },
+    { key: "kanban", label: "Kanban" },
+    { key: "chat", label: "Chat" },
+    { key: "scheduling", label: "Agenda" },
+    { key: "monitoring", label: "Monitoreo" },
+    { key: "analytics", label: "Analíticas" },
+    { key: "reports", label: "Reportes" },
+    { key: "integrations", label: "Integraciones" },
+    { key: "settings", label: "Configuración" },
+    { key: "users", label: "Usuarios" },
+  ];
+
+  const togglePermission = (role: string, domainKey: string, checked: boolean) => {
+    setMatrix(prev => {
+      const current = new Set(prev[role] || []);
+      const wildcard = `${domainKey}.*`;
+      const view = `${domainKey}.view`;
+
+      if (checked) {
+        current.add(wildcard);
+        current.delete(view);
+      } else {
+        current.delete(wildcard);
+        current.delete(view);
+      }
+
+      return { ...prev, [role]: Array.from(current) };
+    });
+  };
+
+  const hasPermission = (role: string, domainKey: string) => {
+    const permissions = matrix[role] || [];
+    return permissions.includes(`${domainKey}.*`) || permissions.includes("*");
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[150px]">Módulo</TableHead>
+              {ROLES.map(role => (
+                <TableHead key={role} className="text-center capitalize">
+                  {role === 'agent' ? 'Agente' : role}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {DOMAINS.map((domain) => (
+              <TableRow key={domain.key}>
+                <TableCell className="font-medium">{domain.label}</TableCell>
+                {ROLES.map(role => (
+                  <TableCell key={role} className="text-center flex align-center items-center justify-center">
+                    <div className="flex justify-center">
+                      <Checkbox
+                        checked={hasPermission(role, domain.key)}
+                        onCheckedChange={(c) => togglePermission(role, domain.key, c as boolean)}
+                      />
+                    </div>
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="flex justify-end">
+        <Button onClick={() => onSave(matrix)} disabled={isLoading}>
+          {isLoading ? "Guardando..." : "Guardar Cambios"}
+        </Button>
+      </div>
     </div>
   );
 }
