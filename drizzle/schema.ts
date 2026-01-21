@@ -14,6 +14,8 @@ export const users = mysqlTable("users", {
   role: mysqlEnum("role", ["owner", "admin", "supervisor", "agent", "viewer"]).default("agent").notNull(),
   isActive: boolean("isActive").default(true).notNull(),
   hasSeenTour: boolean("hasSeenTour").default(false).notNull(),
+  invitationToken: varchar("invitationToken", { length: 255 }),
+  invitationExpires: timestamp("invitationExpires"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
   lastSignedIn: timestamp("lastSignedIn").defaultNow().notNull(),
@@ -47,6 +49,53 @@ export const appSettings = mysqlTable("app_settings", {
 
   // Dashboard configuration (quick actions visibility)
   dashboardConfig: json("dashboardConfig").$type<Record<string, boolean>>(),
+
+  // SMTP Configuration (for email invitations)
+  smtpConfig: json("smtpConfig").$type<{
+    host: string;
+    port: number;
+    secure: boolean;
+    user: string;
+    pass: string;
+    from?: string;
+  }>(),
+
+  // Storage Configuration (S3/Forge)
+  storageConfig: json("storageConfig").$type<{
+    provider: "forge" | "s3";
+    bucket?: string;
+    region?: string;
+    accessKey?: string;
+    secretKey?: string;
+    endpoint?: string;
+    publicUrl?: string;
+  }>(),
+
+  // AI Configuration (OpenAI/Anthropic)
+  aiConfig: json("aiConfig").$type<{
+    provider: "openai" | "anthropic";
+    apiKey: string;
+    model?: string;
+  }>(),
+
+  // Google Maps Configuration
+  mapsConfig: json("mapsConfig").$type<{
+    apiKey: string;
+  }>(),
+
+  // SLA Configuration
+  slaConfig: json("slaConfig").$type<{
+    maxResponseTimeMinutes: number; // e.g. 60
+    alertEmail?: string;
+    notifySupervisor: boolean;
+  }>(),
+
+  // Chat Distribution Configuration
+  chatDistributionConfig: json("chatDistributionConfig").$type<{
+    mode: "manual" | "round_robin" | "all_agents";
+    excludeAgentIds: number[];
+  }>(),
+  lastAssignedAgentId: int("lastAssignedAgentId"),
 
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -97,6 +146,55 @@ export type WhatsappNumber = typeof whatsappNumbers.$inferSelect;
 export type InsertWhatsappNumber = typeof whatsappNumbers.$inferInsert;
 
 /**
+ * Sales Pipelines (e.g., "Default", "Real Estate", "b2b")
+ */
+export const pipelines = mysqlTable("pipelines", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  isDefault: boolean("isDefault").default(false).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Pipeline = typeof pipelines.$inferSelect;
+export type InsertPipeline = typeof pipelines.$inferInsert;
+
+/**
+ * Stages within a pipeline (e.g., "New", "Qualified", "Won")
+ */
+export const pipelineStages = mysqlTable("pipeline_stages", {
+  id: int("id").autoincrement().primaryKey(),
+  pipelineId: int("pipelineId").notNull(), // Foreign key logic handled in app
+  name: varchar("name", { length: 100 }).notNull(),
+  color: varchar("color", { length: 20 }).default("#e2e8f0"),
+  order: int("order").default(0).notNull(),
+  type: mysqlEnum("type", ["open", "won", "lost"]).default("open").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type PipelineStage = typeof pipelineStages.$inferSelect;
+export type InsertPipelineStage = typeof pipelineStages.$inferInsert;
+
+/**
+ * Custom Fields Definitions
+ */
+export const customFieldDefinitions = mysqlTable("custom_field_definitions", {
+  id: int("id").autoincrement().primaryKey(),
+  entityType: mysqlEnum("entityType", ["lead", "contact", "company"]).default("lead").notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  type: mysqlEnum("type", ["text", "number", "date", "select", "checkbox"]).notNull(),
+  options: json("options").$type<string[]>(), // For select type options
+  isRequired: boolean("isRequired").default(false).notNull(),
+  order: int("order").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type CustomFieldDefinition = typeof customFieldDefinitions.$inferSelect;
+export type InsertCustomFieldDefinition = typeof customFieldDefinitions.$inferInsert;
+
+/**
  * Leads managed in the CRM
  */
 export const leads = mysqlTable("leads", {
@@ -105,7 +203,10 @@ export const leads = mysqlTable("leads", {
   phone: varchar("phone", { length: 20 }).notNull(),
   email: varchar("email", { length: 320 }),
   country: varchar("country", { length: 50 }).notNull(),
+  // Status is deprecated but kept for migration. Use pipelineStageId instead.
   status: mysqlEnum("status", ["new", "contacted", "qualified", "negotiation", "won", "lost"]).default("new").notNull(),
+  pipelineStageId: int("pipelineStageId"), // Link to pipeline_stages.id
+  customFields: json("customFields").$type<Record<string, any>>(), // Store dynamic values { "fieldId": value }
   source: varchar("source", { length: 100 }),
   notes: text("notes"),
   commission: decimal("commission", { precision: 10, scale: 2 }).default("0.00"),
@@ -120,12 +221,31 @@ export type Lead = typeof leads.$inferSelect;
 export type InsertLead = typeof leads.$inferInsert;
 
 /**
+ * Message Templates
+ */
+export const templates = mysqlTable("templates", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 150 }).notNull(),
+  content: text("content").notNull(),
+  type: mysqlEnum("type", ["whatsapp", "email"]).default("whatsapp").notNull(),
+  variables: json("variables").$type<string[]>(), // ["name", "company"]
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Template = typeof templates.$inferSelect;
+export type InsertTemplate = typeof templates.$inferInsert;
+
+/**
  * Campaigns for mass messaging
  */
 export const campaigns = mysqlTable("campaigns", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 200 }).notNull(),
   message: text("message").notNull(),
+  type: mysqlEnum("type", ["whatsapp", "email"]).default("whatsapp").notNull(),
+  templateId: int("templateId"),
+  audienceConfig: json("audienceConfig"), // Stores filters used to select audience
   status: mysqlEnum("status", ["draft", "scheduled", "running", "paused", "completed", "cancelled"]).default("draft").notNull(),
   scheduledAt: timestamp("scheduledAt"),
   startedAt: timestamp("startedAt"),
@@ -213,8 +333,44 @@ export const integrations = mysqlTable("integrations", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+
+
 export type Integration = typeof integrations.$inferSelect;
 export type InsertIntegration = typeof integrations.$inferInsert;
+
+
+/**
+ * Workflows for automation (IFTTT)
+ */
+export const workflows = mysqlTable("workflows", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 200 }).notNull(),
+  description: text("description"),
+  isActive: boolean("isActive").default(true).notNull(),
+  triggerType: mysqlEnum("triggerType", ["lead_created", "lead_updated", "msg_received", "campaign_link_clicked"]).notNull(),
+  triggerConfig: json("triggerConfig"), // Filters like { "status": "new" }
+  actions: json("actions").$type<any[]>(), // Array of actions: [{ type: 'send_whatsapp', templateId: 1 }]
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Workflow = typeof workflows.$inferSelect;
+export type InsertWorkflow = typeof workflows.$inferInsert;
+
+/**
+ * Logs for workflow execution
+ */
+export const workflowLogs = mysqlTable("workflow_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  workflowId: int("workflowId").notNull(),
+  entityId: int("entityId").notNull(), // leadId or other
+  status: mysqlEnum("status", ["success", "failed"]).notNull(),
+  details: text("details"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type WorkflowLog = typeof workflowLogs.$inferSelect;
+export type InsertWorkflowLog = typeof workflowLogs.$inferInsert;
 
 
 /**
@@ -349,21 +505,44 @@ export type FacebookPage = typeof facebookPages.$inferSelect;
 export type InsertFacebookPage = typeof facebookPages.$inferInsert;
 
 /**
- * Automations / Workflows
+ * Access Logs for security audit
  */
-export const workflows = mysqlTable("workflows", {
+export const accessLogs = mysqlTable("access_logs", {
   id: int("id").autoincrement().primaryKey(),
-  name: varchar("name", { length: 200 }).notNull(),
-  triggerType: mysqlEnum("triggerType", ["lead_created", "status_changed", "message_received"]).notNull(),
-  // Conditions stored as JSON, e.g., { "country": "Panama", "status": "new" }
-  conditions: json("conditions").$type<Record<string, any>>(),
-  // Actions stored as JSON array, e.g., [{ "type": "send_message", "payload": "Hello" }, { "type": "assign_agent", "agentId": 1 }]
-  actions: json("actions").$type<any[]>(),
-  isActive: boolean("isActive").default(true).notNull(),
+  userId: int("userId"),
+  action: varchar("action", { length: 200 }).notNull(),
+  entityType: varchar("entityType", { length: 100 }),
+  entityId: int("entityId"),
+  ipAddress: varchar("ipAddress", { length: 45 }), // IPv6 compatible
+  userAgent: text("userAgent"),
+  success: boolean("success").default(true).notNull(),
+  errorMessage: text("errorMessage"),
+  metadata: json("metadata"), // Additional context
   createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
-export type Workflow = typeof workflows.$inferSelect;
-export type InsertWorkflow = typeof workflows.$inferInsert;
+export type AccessLog = typeof accessLogs.$inferSelect;
+export type InsertAccessLog = typeof accessLogs.$inferInsert;
+
+/**
+ * Active sessions for force logout and session management
+ */
+export const sessions = mysqlTable("sessions", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  sessionToken: varchar("sessionToken", { length: 255 }).notNull().unique(),
+  ipAddress: varchar("ipAddress", { length: 45 }),
+  userAgent: text("userAgent"),
+  lastActivityAt: timestamp("lastActivityAt").defaultNow().notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type Session = typeof sessions.$inferSelect;
+export type InsertSession = typeof sessions.$inferInsert;
+
+/**
+ * Automations / Workflows
+ */
+
 

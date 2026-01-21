@@ -4,16 +4,24 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router, adminProcedure, permissionProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { getDb } from "./db";
-import { leads, whatsappNumbers, campaigns, campaignRecipients, messages, activityLogs, users, integrations, appointments, appointmentReasons, conversations, chatMessages, whatsappConnections, appSettings, workflows, reminderTemplates } from "../drizzle/schema";
+import { leads, whatsappNumbers, campaigns, campaignRecipients, messages, activityLogs, users, integrations, appointments, appointmentReasons, conversations, chatMessages, whatsappConnections, appSettings, workflows, reminderTemplates, pipelines, pipelineStages, customFieldDefinitions, templates, accessLogs, sessions } from "../drizzle/schema";
+
+// ...
+
+
 import { assertSafeOutboundUrl } from "./_core/urlSafety";
 import { encryptSecret, decryptSecret, maskSecret } from "./_core/crypto";
 import { sendCloudMessage } from "./whatsapp/cloud";
 import { dispatchIntegrationEvent } from "./_core/integrationDispatch";
-import { eq, desc, sql, and, count } from "drizzle-orm";
+import { eq, desc, sql, and, count, asc } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { nanoid } from "nanoid";
 import { sdk } from "./_core/sdk";
 import { ONE_YEAR_MS } from "@shared/const";
+import { sendEmail, verifySmtpConnection } from "./_core/email";
+import { distributeConversation } from "./services/distribution";
+import { logAccess, getClientIp } from "./services/security";
+import { createBackup, validateBackupFile, leadsToCSV, parseCSV, importLeadsFromCSV } from "./services/backup";
 
 export const appRouter = router({
   system: systemRouter,
@@ -66,14 +74,42 @@ export const appRouter = router({
 
         return { success: true };
       }),
+
+    acceptInvitation: publicProcedure
+      .input(z.object({ token: z.string(), password: z.string().min(6) }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+
+        const user = await db.select().from(users).where(eq(users.invitationToken, input.token)).limit(1);
+        if (!user[0]) throw new Error("Invalid token");
+
+        if (user[0].invitationExpires && new Date() > user[0].invitationExpires) {
+          throw new Error("Token expired");
+        }
+
+        const hashedPassword = await bcrypt.hash(input.password, 10);
+
+        await db.update(users)
+          .set({
+            password: hashedPassword,
+            invitationToken: null,
+            invitationExpires: null,
+            isActive: true,
+            loginMethod: 'credentials'
+          })
+          .where(eq(users.id, user[0].id));
+
+        return { success: true };
+      }),
   }),
 
   // --- Pro Settings / Team / RBAC ---
   settings: router({
     /**
-     * Settings panel (only admin/owner)
+     * Settings panel (only admin/owner or with settings.view)
      */
-    get: adminProcedure.query(async () => {
+    get: permissionProcedure("settings.view").query(async () => {
       const db = await getDb();
       if (!db) return null;
 
@@ -121,7 +157,7 @@ export const appRouter = router({
       return rows[0] ?? null;
     }),
 
-    updateGeneral: adminProcedure
+    updateGeneral: permissionProcedure("settings.manage")
       .input(
         z.object({
           companyName: z.string().min(1).max(120).optional(),
@@ -134,6 +170,19 @@ export const appRouter = router({
               slotMinutes: z.number().min(5).max(120),
               maxPerSlot: z.number().min(1).max(20),
               allowCustomTime: z.boolean(),
+            })
+            .optional(),
+          chatDistributionConfig: z
+            .object({
+              mode: z.enum(["manual", "round_robin", "all_agents"]),
+              excludeAgentIds: z.array(z.number()),
+            })
+            .optional(),
+          slaConfig: z
+            .object({
+              maxResponseTimeMinutes: z.number().min(5),
+              alertEmail: z.string().email().optional().or(z.literal("")),
+              notifySupervisor: z.boolean(),
             })
             .optional(),
         })
@@ -152,6 +201,8 @@ export const appRouter = router({
             currency: input.currency ?? "PYG",
             permissionsMatrix: undefined,
             scheduling: input.scheduling ?? { slotMinutes: 15, maxPerSlot: 6, allowCustomTime: true },
+            slaConfig: input.slaConfig,
+            chatDistributionConfig: input.chatDistributionConfig,
           });
         } else {
           await db.update(appSettings).set({
@@ -161,6 +212,8 @@ export const appRouter = router({
             ...(input.language ? { language: input.language } : {}),
             ...(input.currency ? { currency: input.currency } : {}),
             ...(input.scheduling ? { scheduling: input.scheduling } : {}),
+            ...(input.slaConfig ? { slaConfig: input.slaConfig } : {}),
+            ...(input.chatDistributionConfig ? { chatDistributionConfig: input.chatDistributionConfig } : {}),
           });
         }
 
@@ -185,7 +238,7 @@ export const appRouter = router({
         return { success: true } as const;
       }),
 
-    updateDashboardConfig: adminProcedure
+    updateDashboardConfig: permissionProcedure("settings.manage")
       .input(z.record(z.string(), z.boolean()))
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
@@ -195,6 +248,97 @@ export const appRouter = router({
           await db.insert(appSettings).values({ dashboardConfig: input });
         } else {
           await db.update(appSettings).set({ dashboardConfig: input });
+        }
+        return { success: true };
+      }),
+
+    updateSmtpConfig: permissionProcedure("settings.manage")
+      .input(z.object({
+        host: z.string(),
+        port: z.number(),
+        secure: z.boolean(),
+        user: z.string(),
+        pass: z.string(),
+        from: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+
+        const existing = await db.select().from(appSettings).limit(1);
+        if (existing.length === 0) {
+          await db.insert(appSettings).values({ smtpConfig: input });
+        } else {
+          await db.update(appSettings).set({ smtpConfig: input });
+        }
+        return { success: true };
+      }),
+
+    verifySmtpTest: permissionProcedure("settings.manage")
+      .input(z.object({ email: z.string().email() }))
+      .mutation(async ({ input }) => {
+        const sent = await sendEmail({
+          to: input.email,
+          subject: "Test SMTP Connection - Imagine CRM",
+          html: "<p>If you see this, your SMTP configuration is working correctly! 🚀</p>",
+        });
+        if (!sent) throw new Error("Failed to send email. Check server logs.");
+        return { success: true };
+      }),
+
+    updateStorageConfig: permissionProcedure("settings.manage")
+      .input(z.object({
+        provider: z.enum(["forge", "s3"]),
+        bucket: z.string().optional(),
+        region: z.string().optional(),
+        accessKey: z.string().optional(),
+        secretKey: z.string().optional(),
+        endpoint: z.string().optional(),
+        publicUrl: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+        const existing = await db.select().from(appSettings).limit(1);
+        if (!existing[0]) {
+          await db.insert(appSettings).values({ storageConfig: input });
+        } else {
+          await db.update(appSettings).set({ storageConfig: input });
+        }
+        return { success: true };
+      }),
+
+    updateAiConfig: permissionProcedure("settings.manage")
+      .input(z.object({
+        provider: z.enum(["openai", "anthropic"]),
+        apiKey: z.string().min(1),
+        model: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+        const existing = await db.select().from(appSettings).limit(1);
+        // In a real app we might encrypt the apiKey
+        if (!existing[0]) {
+          await db.insert(appSettings).values({ aiConfig: input });
+        } else {
+          await db.update(appSettings).set({ aiConfig: input });
+        }
+        return { success: true };
+      }),
+
+    updateMapsConfig: permissionProcedure("settings.manage")
+      .input(z.object({
+        apiKey: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+        const existing = await db.select().from(appSettings).limit(1);
+        if (!existing[0]) {
+          await db.insert(appSettings).values({ mapsConfig: input });
+        } else {
+          await db.update(appSettings).set({ mapsConfig: input });
         }
         return { success: true };
       }),
@@ -216,9 +360,9 @@ export const appRouter = router({
     }),
   }),
 
-  // Team management (only admin/owner)
+  // Team management
   team: router({
-    listUsers: adminProcedure.query(async () => {
+    listUsers: permissionProcedure("users.view").query(async () => {
       const db = await getDb();
       if (!db) return [];
 
@@ -234,7 +378,7 @@ export const appRouter = router({
       }).from(users).orderBy(desc(users.createdAt));
     }),
 
-    updateRole: adminProcedure
+    updateRole: permissionProcedure("users.manage")
       .input(z.object({ userId: z.number(), role: z.enum(["owner", "admin", "supervisor", "agent", "viewer"]) }))
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
@@ -255,7 +399,7 @@ export const appRouter = router({
         return { success: true } as const;
       }),
 
-    setActive: adminProcedure
+    setActive: permissionProcedure("users.manage")
       .input(z.object({ userId: z.number(), isActive: z.boolean() }))
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
@@ -270,7 +414,7 @@ export const appRouter = router({
         return { success: true } as const;
       }),
 
-    create: adminProcedure
+    create: permissionProcedure("users.manage")
       .input(z.object({
         name: z.string().min(1),
         email: z.string().email(),
@@ -302,6 +446,55 @@ export const appRouter = router({
         });
 
         return { id: result[0].insertId, success: true };
+      }),
+
+    invite: permissionProcedure("users.manage")
+      .input(z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+        role: z.enum(["admin", "supervisor", "agent", "viewer"]),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+
+        const existing = await db.select().from(users).where(eq(users.email, input.email)).limit(1);
+        if (existing.length > 0) {
+          throw new Error("User already exists");
+        }
+
+        const token = nanoid(32);
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+        const openId = `invite_${nanoid(16)}`;
+
+        await db.insert(users).values({
+          openId,
+          name: input.name,
+          email: input.email,
+          role: input.role,
+          isActive: true,
+          invitationToken: token,
+          invitationExpires: expiresAt,
+          loginMethod: "credentials",
+        });
+
+        const baseUrl = process.env.VITE_API_URL || "http://localhost:3000";
+        const inviteLink = `${baseUrl}/setup-account?token=${token}`;
+
+        await sendEmail({
+          to: input.email,
+          subject: "Welcome to Imagine CRM - Setup your account",
+          html: `
+            <h3>Hello ${input.name}!</h3>
+            <p>You have been invited to join Imagine CRM as a <strong>${input.role}</strong>.</p>
+            <p>Click the link below to set your password and access the system:</p>
+            <a href="${inviteLink}">${inviteLink}</a>
+            <p>This link expires in 24 hours.</p>
+          `,
+        });
+
+        return { success: true };
       }),
   }),
 
@@ -389,6 +582,278 @@ export const appRouter = router({
     }),
   }),
 
+  pipelines: router({
+    list: permissionProcedure("kanban.view").query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+
+      let allPipelines = await db.select().from(pipelines);
+
+      // Auto-create default pipeline if none exists
+      if (allPipelines.length === 0) {
+        const result = await db.insert(pipelines).values({
+          name: "Pipeline por defecto",
+          isDefault: true,
+        });
+        const pipelineId = result[0].insertId;
+
+        // Default stages mapping old statuses
+        const defaults = [
+          { name: "Nuevo", color: "#dbeafe", type: "open", order: 0 },       // blue-100
+          { name: "Contactado", color: "#fef9c3", type: "open", order: 1 },  // yellow-100
+          { name: "Calificado", color: "#f3e8ff", type: "open", order: 2 },  // purple-100
+          { name: "Negociación", color: "#e0e7ff", type: "open", order: 3 }, // indigo-100
+          { name: "Ganado", color: "#dcfce7", type: "won", order: 4 },       // green-100
+          { name: "Perdido", color: "#fee2e2", type: "lost", order: 5 },     // red-100
+        ];
+
+        for (const s of defaults) {
+          await db.insert(pipelineStages).values({
+            pipelineId,
+            name: s.name,
+            color: s.color,
+            type: s.type as any,
+            order: s.order,
+          });
+        }
+
+        allPipelines = await db.select().from(pipelines);
+      }
+
+      const allStages = await db.select().from(pipelineStages).orderBy(asc(pipelineStages.order));
+
+      return allPipelines.map(p => ({
+        ...p,
+        stages: allStages.filter(s => s.pipelineId === p.id)
+      }));
+    }),
+
+    create: permissionProcedure("kanban.manage")
+      .input(z.object({ name: z.string().min(1) }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+
+        const result = await db.insert(pipelines).values({ name: input.name });
+        const pipelineId = result[0].insertId;
+
+        // Add default stages for new pipelines too? Or empty? Let's add standard ones
+        const defaults = [
+          { name: "Nuevo", color: "#e2e8f0", order: 0 },
+          { name: "En Proceso", color: "#fef9c3", order: 1 },
+          { name: "Ganado", color: "#dcfce7", type: "won", order: 2 },
+          { name: "Perdido", color: "#fee2e2", type: "lost", order: 3 },
+        ];
+
+        for (const s of defaults) {
+          await db.insert(pipelineStages).values({
+            pipelineId,
+            name: s.name,
+            color: s.color,
+            type: (s.type as any) || "open",
+            order: s.order,
+          });
+        }
+
+        return { success: true, id: pipelineId };
+      }),
+
+    updateStage: permissionProcedure("kanban.manage")
+      .input(z.object({
+        id: z.number(),
+        name: z.string().optional(),
+        color: z.string().optional(),
+        order: z.number().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB error");
+        await db.update(pipelineStages).set(input).where(eq(pipelineStages.id, input.id));
+        return { success: true };
+      }),
+  }),
+
+  customFields: router({
+    list: permissionProcedure("leads.view").query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(customFieldDefinitions).orderBy(asc(customFieldDefinitions.order));
+    }),
+
+    create: permissionProcedure("settings.manage")
+      .input(z.object({
+        name: z.string().min(1),
+        type: z.enum(["text", "number", "date", "select", "checkbox"]),
+        options: z.array(z.string()).optional(),
+        entityType: z.enum(["lead", "contact", "company"]).default("lead"),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+        await db.insert(customFieldDefinitions).values(input);
+        return { success: true };
+      }),
+  }),
+
+  // Templates Router
+  templates: router({
+    list: permissionProcedure("campaigns.view").query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(templates).orderBy(desc(templates.createdAt));
+    }),
+
+    create: permissionProcedure("campaigns.manage")
+      .input(z.object({
+        name: z.string().min(1),
+        content: z.string().min(1),
+        type: z.enum(["whatsapp", "email"]),
+        variables: z.array(z.string()).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+        await db.insert(templates).values(input);
+        return { success: true };
+      }),
+
+    update: permissionProcedure("campaigns.manage")
+      .input(z.object({
+        id: z.number(),
+        name: z.string().optional(),
+        content: z.string().optional(),
+        variables: z.array(z.string()).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+        await db.update(templates).set(input).where(eq(templates.id, input.id));
+        return { success: true };
+      }),
+
+    delete: permissionProcedure("campaigns.manage")
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB error");
+        await db.delete(templates).where(eq(templates.id, input.id));
+        return { success: true };
+      }),
+  }),
+
+  // Campaigns Router
+  campaigns: router({
+    list: permissionProcedure("campaigns.view").query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(campaigns).orderBy(desc(campaigns.createdAt));
+    }),
+
+    create: permissionProcedure("campaigns.manage")
+      .input(z.object({
+        name: z.string().min(1),
+        type: z.enum(["whatsapp", "email"]),
+        templateId: z.number().optional(),
+        message: z.string(), // Fallback or override
+        audienceConfig: z.any().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+        const result = await db.insert(campaigns).values({
+          ...input,
+          status: "draft",
+        });
+        return { success: true, id: result[0].insertId };
+      }),
+
+    calculateAudience: permissionProcedure("campaigns.manage")
+      .input(z.object({
+        pipelineStageId: z.number().optional(),
+        tags: z.array(z.string()).optional(),
+        // Add more filters as needed
+      }))
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return { count: 0 };
+
+        // Simple filter by stage for now
+        const conditions = [];
+        if (input.pipelineStageId) {
+          conditions.push(eq(leads.pipelineStageId, input.pipelineStageId));
+        }
+
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+        const countResult = await db.select({ count: count() }).from(leads).where(whereClause);
+        return { count: countResult[0]?.count ?? 0 };
+      }),
+
+    launch: permissionProcedure("campaigns.manage")
+      .input(z.object({ campaignId: z.number() }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB error");
+
+        const campaign = await db.select().from(campaigns).where(eq(campaigns.id, input.campaignId)).limit(1);
+        if (!campaign[0]) throw new Error("Campaign not found");
+
+        const config = campaign[0].audienceConfig as any;
+
+        // Fetch audience
+        const conditions = [];
+        if (config?.pipelineStageId) {
+          conditions.push(eq(leads.pipelineStageId, config.pipelineStageId));
+        }
+        const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+        const audience = await db.select().from(leads).where(whereClause);
+
+        // Create recipients
+        for (const lead of audience) {
+          await db.insert(campaignRecipients).values({
+            campaignId: input.campaignId,
+            leadId: lead.id,
+            status: "pending",
+          });
+        }
+
+        await db.update(campaigns).set({
+          status: "scheduled", // Or running immediately
+          totalRecipients: audience.length,
+          startedAt: new Date(),
+        }).where(eq(campaigns.id, input.campaignId));
+
+        // TODO: Trigger actual sending process (Queue/Worker)
+
+        return { success: true, recipientsCount: audience.length };
+      }),
+
+    getById: permissionProcedure("campaigns.view")
+      .input(z.object({ id: z.number() }))
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return null;
+
+        const result = await db.select()
+          .from(campaigns)
+          .where(eq(campaigns.id, input.id))
+          .limit(1);
+
+        return result[0] ?? null;
+      }),
+
+    delete: permissionProcedure("campaigns.manage")
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+
+        await db.delete(campaigns).where(eq(campaigns.id, input.id));
+        return { success: true };
+      }),
+  }),
+
   // Leads router
   leads: router({
     search: protectedProcedure
@@ -414,7 +879,7 @@ export const appRouter = router({
 
     list: permissionProcedure("leads.view")
       .input(z.object({
-        status: z.enum(['new', 'contacted', 'qualified', 'negotiation', 'won', 'lost']).optional(),
+        pipelineStageId: z.number().optional(),
         limit: z.number().min(1).max(100).default(50),
         offset: z.number().min(0).default(0),
       }).optional())
@@ -424,8 +889,8 @@ export const appRouter = router({
 
         let query = db.select().from(leads);
 
-        if (input?.status) {
-          query = query.where(eq(leads.status, input.status)) as typeof query;
+        if (input?.pipelineStageId) {
+          query = query.where(eq(leads.pipelineStageId, input.pipelineStageId)) as typeof query;
         }
 
         return query
@@ -433,6 +898,7 @@ export const appRouter = router({
           .limit(input?.limit ?? 50)
           .offset(input?.offset ?? 0);
       }),
+
     getById: permissionProcedure("leads.view")
       .input(z.object({ id: z.number() }))
       .query(async ({ input }) => {
@@ -444,12 +910,9 @@ export const appRouter = router({
           .where(eq(leads.id, input.id))
           .limit(1);
 
-        const row = result[0] ?? null;
-
-        if (!row) return null;
-
-        return row;
+        return result[0] ?? null;
       }),
+
     create: permissionProcedure("leads.create")
       .input(z.object({
         name: z.string().min(1),
@@ -458,24 +921,33 @@ export const appRouter = router({
         country: z.string().min(1),
         source: z.string().optional(),
         notes: z.string().optional(),
+        pipelineStageId: z.number().optional(),
+        customFields: z.record(z.any()).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("Database not available");
 
-        // Calculate commission based on country
+        // Calculate commission
         const commission = input.country.toLowerCase() === 'panamá' || input.country.toLowerCase() === 'panama'
           ? '10000.00'
           : '5000.00';
+
+        // Use provided stage or find default first stage?
+        // We'll leave it null if not provided, and getByPipeline will migrate it or we can set it here.
+        // Better set it here if we can.
 
         const result = await db.insert(leads).values({
           ...input,
           commission,
           assignedToId: ctx.user?.id,
+          // If pipelineStageId is undefined, it will be null. 
+          // Ideally we fetch default pipeline first stage, but for speed let's rely on migration logic or frontend sending it.
         });
 
         return { id: result[0].insertId, success: true };
       }),
+
     update: permissionProcedure("leads.update")
       .input(z.object({
         id: z.number(),
@@ -483,9 +955,10 @@ export const appRouter = router({
         phone: z.string().min(1).optional(),
         email: z.string().email().optional().nullable(),
         country: z.string().min(1).optional(),
-        status: z.enum(['new', 'contacted', 'qualified', 'negotiation', 'won', 'lost']).optional(),
         source: z.string().optional().nullable(),
         notes: z.string().optional().nullable(),
+        pipelineStageId: z.number().optional(),
+        customFields: z.record(z.any()).optional(),
       }))
       .mutation(async ({ input }) => {
         const db = await getDb();
@@ -493,7 +966,6 @@ export const appRouter = router({
 
         const { id, ...data } = input;
 
-        // Recalculate commission if country changed
         if (data.country) {
           (data as Record<string, unknown>).commission = data.country.toLowerCase() === 'panamá' || data.country.toLowerCase() === 'panama'
             ? '10000.00'
@@ -501,57 +973,108 @@ export const appRouter = router({
         }
 
         await db.update(leads)
-          .set(data)
+          .set(data as any)
           .where(eq(leads.id, id));
 
         return { success: true };
       }),
+
     updateStatus: permissionProcedure("leads.update")
       .input(z.object({
         id: z.number(),
-        status: z.enum(['new', 'contacted', 'qualified', 'negotiation', 'won', 'lost']),
+        // Support both for backward compatibility or refactor
+        pipelineStageId: z.number(),
       }))
       .mutation(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new Error("Database not available");
 
         await db.update(leads)
-          .set({ status: input.status })
+          .set({ pipelineStageId: input.pipelineStageId })
           .where(eq(leads.id, input.id));
 
         return { success: true };
       }),
+
     delete: permissionProcedure("leads.delete")
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new Error("Database not available");
-
         await db.delete(leads).where(eq(leads.id, input.id));
         return { success: true };
       }),
-    getByStatus: permissionProcedure("leads.view").query(async () => {
-      const db = await getDb();
-      if (!db) return {
-        new: [],
-        contacted: [],
-        qualified: [],
-        negotiation: [],
-        won: [],
-        lost: [],
-      };
 
-      const allLeads = await db.select().from(leads).orderBy(desc(leads.createdAt));
+    getByPipeline: permissionProcedure("leads.view")
+      .input(z.object({ pipelineId: z.number().optional() }))
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return {};
 
-      return {
-        new: allLeads.filter(l => l.status === 'new'),
-        contacted: allLeads.filter(l => l.status === 'contacted'),
-        qualified: allLeads.filter(l => l.status === 'qualified'),
-        negotiation: allLeads.filter(l => l.status === 'negotiation'),
-        won: allLeads.filter(l => l.status === 'won'),
-        lost: allLeads.filter(l => l.status === 'lost'),
-      };
-    }),
+        // 1. Get Pipeline (or default)
+        let pipeline = null;
+        if (input.pipelineId) {
+          const p = await db.select().from(pipelines).where(eq(pipelines.id, input.pipelineId)).limit(1);
+          pipeline = p[0];
+        } else {
+          const p = await db.select().from(pipelines).where(eq(pipelines.isDefault, true)).limit(1);
+          if (p[0]) pipeline = p[0];
+        }
+
+        if (!pipeline) return {}; // valid case if no pipelines yet (though list creates one)
+
+        // 2. Get Stages
+        const stages = await db.select().from(pipelineStages).where(eq(pipelineStages.pipelineId, pipeline.id)).orderBy(asc(pipelineStages.order));
+
+        // 3. Get All Leads (optimization: filter by stages if possible)
+        // Since leads might have null stage, we fetch all? Or ideally fetch all and filter in memory for migration check.
+        // For performance, we should filtering by stageId IN (stages.ids) OR stageId IS NULL.
+        const allLeads = await db.select().from(leads);
+
+        const result: Record<string, typeof leads.$inferSelect[]> = {};
+        stages.forEach(s => result[s.id] = []);
+
+        const updates: Promise<any>[] = [];
+
+        for (const lead of allLeads) {
+          // If lead belongs to one of the stages, add it
+          if (lead.pipelineStageId) {
+            if (result[lead.pipelineStageId]) {
+              result[lead.pipelineStageId].push(lead);
+            }
+            // if lead has stage ID but not in this pipeline, we skip it (it belongs to another pipeline)
+          } else {
+            // Migration logic: Map old status to new stage
+            // We need to map 'new' -> 1st stage, 'contacted' -> 2nd, etc. 
+            // We configured default map in pipelines.list
+            // "New", "Contacted", "Qualified", "Negotiation", "Won", "Lost"
+            // names match STATUSES keys roughly.
+            let targetStageName = "";
+            switch (lead.status) {
+              case 'new': targetStageName = "Nuevo"; break;
+              case 'contacted': targetStageName = "Contactado"; break;
+              case 'qualified': targetStageName = "Calificado"; break;
+              case 'negotiation': targetStageName = "Negociación"; break;
+              case 'won': targetStageName = "Ganado"; break;
+              case 'lost': targetStageName = "Perdido"; break;
+              default: targetStageName = "Nuevo";
+            }
+
+            const mapped = stages.find(s => s.name === targetStageName) || stages[0];
+            if (mapped) {
+              // Add to updating queue
+              updates.push(db.update(leads).set({ pipelineStageId: mapped.id }).where(eq(leads.id, lead.id)));
+              // Add to result
+              result[mapped.id].push({ ...lead, pipelineStageId: mapped.id });
+            }
+          }
+        }
+
+        // Execute migration updates in background (or await if critical)
+        if (updates.length > 0) await Promise.all(updates);
+
+        return result;
+      }),
   }),
 
   // WhatsApp Numbers router
@@ -733,82 +1256,7 @@ export const appRouter = router({
   }),
 
   // Campaigns router
-  campaigns: router({
-    list: permissionProcedure("campaigns.view").query(async () => {
-      const db = await getDb();
-      if (!db) return [];
 
-      return db.select()
-        .from(campaigns)
-        .orderBy(desc(campaigns.createdAt));
-    }),
-
-    getById: permissionProcedure("campaigns.view")
-      .input(z.object({ id: z.number() }))
-      .query(async ({ input }) => {
-        const db = await getDb();
-        if (!db) return null;
-
-        const result = await db.select()
-          .from(campaigns)
-          .where(eq(campaigns.id, input.id))
-          .limit(1);
-
-        return result[0] ?? null;
-      }),
-
-    create: permissionProcedure("campaigns.manage")
-      .input(z.object({
-        name: z.string().min(1),
-        message: z.string().min(1),
-        scheduledAt: z.date().optional(),
-      }))
-      .mutation(async ({ input, ctx }) => {
-        const db = await getDb();
-        if (!db) throw new Error("Database not available");
-
-        const result = await db.insert(campaigns).values({
-          ...input,
-          createdById: ctx.user?.id,
-        });
-
-        return { id: result[0].insertId, success: true };
-      }),
-
-    updateStatus: permissionProcedure("campaigns.manage")
-      .input(z.object({
-        id: z.number(),
-        status: z.enum(['draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled']),
-      }))
-      .mutation(async ({ input }) => {
-        const db = await getDb();
-        if (!db) throw new Error("Database not available");
-
-        const updateData: Record<string, unknown> = { status: input.status };
-
-        if (input.status === 'running') {
-          updateData.startedAt = new Date();
-        } else if (input.status === 'completed') {
-          updateData.completedAt = new Date();
-        }
-
-        await db.update(campaigns)
-          .set(updateData)
-          .where(eq(campaigns.id, input.id));
-
-        return { success: true };
-      }),
-
-    delete: permissionProcedure("campaigns.manage")
-      .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
-        const db = await getDb();
-        if (!db) throw new Error("Database not available");
-
-        await db.delete(campaigns).where(eq(campaigns.id, input.id));
-        return { success: true };
-      }),
-  }),
 
   // Integrations router
   integrations: router({
@@ -1532,7 +1980,16 @@ export const appRouter = router({
           status: 'active',
         } as any);
 
-        return { id: result[0].insertId, success: true };
+        const newConvId = result[0].insertId;
+
+        // Attempt distribution
+        try {
+          await distributeConversation(newConvId);
+        } catch (e) {
+          console.error("[CreateConversation] Distribution failed", e);
+        }
+
+        return { id: newConvId, success: true };
       }),
   }),
 
@@ -1726,8 +2183,8 @@ export const appRouter = router({
       }),
   }),
 
-  // Automations router
-  automations: router({
+  // Workflows router
+  workflows: router({
     list: permissionProcedure("campaigns.view").query(async () => {
       const db = await getDb();
       if (!db) return [];
@@ -1737,8 +2194,9 @@ export const appRouter = router({
     create: permissionProcedure("campaigns.manage")
       .input(z.object({
         name: z.string().min(1),
-        triggerType: z.enum(["lead_created", "status_changed", "message_received"]),
-        conditions: z.record(z.any()).optional(),
+        description: z.string().optional(),
+        triggerType: z.enum(["lead_created", "lead_updated", "msg_received", "campaign_link_clicked"]),
+        triggerConfig: z.any().optional(),
         actions: z.array(z.any()).optional(),
       }))
       .mutation(async ({ input }) => {
@@ -1750,6 +2208,24 @@ export const appRouter = router({
           isActive: true
         });
         return { success: true, id: result[0].insertId };
+      }),
+
+    update: permissionProcedure("campaigns.manage")
+      .input(z.object({
+        id: z.number(),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        triggerType: z.enum(["lead_created", "lead_updated", "msg_received", "campaign_link_clicked"]).optional(),
+        triggerConfig: z.any().optional(),
+        actions: z.array(z.any()).optional(),
+        isActive: z.boolean().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB error");
+
+        await db.update(workflows).set(input).where(eq(workflows.id, input.id));
+        return { success: true };
       }),
 
     toggle: permissionProcedure("campaigns.manage")
@@ -1768,6 +2244,142 @@ export const appRouter = router({
         if (!db) throw new Error("Database not available");
         await db.delete(workflows).where(eq(workflows.id, input.id));
         return { success: true };
+      }),
+  }),
+
+  // Security router for access logs and session management
+  security: router({
+    listAccessLogs: permissionProcedure("settings.view")
+      .input(z.object({
+        userId: z.number().optional(),
+        action: z.string().optional(),
+        limit: z.number().min(10).max(200).default(50),
+        offset: z.number().default(0),
+      }))
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return [];
+
+        let query = db.select().from(accessLogs).orderBy(desc(accessLogs.createdAt));
+
+        // Apply filters
+        const conditions = [];
+        if (input.userId) conditions.push(eq(accessLogs.userId, input.userId));
+        if (input.action) conditions.push(eq(accessLogs.action, input.action));
+
+        if (conditions.length > 0) {
+          query = query.where(and(...conditions)) as any;
+        }
+
+        const results = await query.limit(input.limit).offset(input.offset);
+
+        // Join with user names
+        const userIds = Array.from(new Set(results.map(r => r.userId).filter(Boolean))) as number[];
+        const usersList = userIds.length > 0
+          ? await db.select().from(users).where(sql`${users.id} IN (${sql.join(userIds.map(id => sql`${id}`), sql`, `)})`)
+          : [];
+
+        const usersMap = new Map(usersList.map(u => [u.id, u.name]));
+
+        return results.map(log => ({
+          ...log,
+          userName: log.userId ? usersMap.get(log.userId) : null,
+        }));
+      }),
+
+    listActiveSessions: permissionProcedure("settings.view")
+      .query(async ({ ctx }) => {
+        const db = await getDb();
+        if (!db) return [];
+
+        // Get all non-expired sessions
+        const now = new Date();
+        const activeSessions = await db.select()
+          .from(sessions)
+          .where(sql`${sessions.expiresAt} > ${now}`)
+          .orderBy(desc(sessions.lastActivityAt));
+
+        // Join with user names
+        const userIds = Array.from(new Set(activeSessions.map(s => s.userId)));
+        const usersList = userIds.length > 0
+          ? await db.select().from(users).where(sql`${users.id} IN (${sql.join(userIds.map(id => sql`${id}`), sql`, `)})`)
+          : [];
+
+        const usersMap = new Map(usersList.map(u => [u.id, u.name]));
+
+        return activeSessions.map(session => ({
+          ...session,
+          userName: usersMap.get(session.userId) ?? "Unknown",
+        }));
+      }),
+
+    revokeSession: permissionProcedure("settings.manage")
+      .input(z.object({ sessionId: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+
+        // Delete the session
+        await db.delete(sessions).where(eq(sessions.id, input.sessionId));
+
+        // Log the action
+        await logAccess({
+          userId: ctx.user?.id,
+          action: "revoke_session",
+          entityType: "session",
+          entityId: input.sessionId,
+          ipAddress: getClientIp(ctx.req),
+          userAgent: ctx.req.headers['user-agent'],
+        });
+
+        return { success: true };
+      }),
+  }),
+
+  // Backup and data management router
+  backup: router({
+    createBackup: permissionProcedure("settings.manage")
+      .mutation(async ({ ctx }) => {
+        const backupData = await createBackup();
+
+        // Log the backup action
+        await logAccess({
+          userId: ctx.user?.id,
+          action: "create_backup",
+          ipAddress: getClientIp(ctx.req),
+          userAgent: ctx.req.headers['user-agent'],
+        });
+
+        return backupData;
+      }),
+
+    exportLeadsCSV: permissionProcedure("leads.view")
+      .query(async () => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+
+        const leadsData = await db.select().from(leads);
+        const csvContent = leadsToCSV(leadsData);
+
+        return { csv: csvContent, count: leadsData.length };
+      }),
+
+    importLeadsCSV: permissionProcedure("leads.create")
+      .input(z.object({ csvContent: z.string() }))
+      .mutation(async ({ input, ctx }) => {
+        const parsedData = parseCSV(input.csvContent);
+        const result = await importLeadsFromCSV(parsedData);
+
+        // Log the import action
+        await logAccess({
+          userId: ctx.user?.id,
+          action: "import_leads_csv",
+          metadata: { result },
+          ipAddress: getClientIp(ctx.req),
+          userAgent: ctx.req.headers['user-agent'],
+        });
+
+        return result;
       }),
   }),
 });

@@ -64,10 +64,12 @@ interface Lead {
   phone: string;
   email: string | null;
   country: string;
-  status: LeadStatus;
+  status: string; // Deprecated, use pipelineStageId
+  pipelineStageId: number | null;
   source: string | null;
   notes: string | null;
   commission: string | null;
+  customFields?: Record<string, any>;
   createdAt: Date;
 }
 
@@ -95,7 +97,7 @@ export default function Leads() {
 
 function LeadsContent() {
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">("all");
+  const [stageFilter, setStageFilter] = useState<string>("all");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newLead, setNewLead] = useState({
     name: "",
@@ -108,8 +110,14 @@ function LeadsContent() {
 
   const utils = trpc.useUtils();
   const { data: leads, isLoading } = trpc.leads.list.useQuery({
-    status: statusFilter === "all" ? undefined : statusFilter,
+    pipelineStageId: stageFilter !== "all" ? Number(stageFilter) : undefined,
   });
+  const { data: pipelines } = trpc.pipelines.list.useQuery();
+  const defaultPipeline = pipelines?.find(p => p.isDefault) || pipelines?.[0];
+  const stages = defaultPipeline?.stages || [];
+
+  const { data: customFieldDefs } = trpc.customFields.list.useQuery();
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({});
 
   const createLead = trpc.leads.create.useMutation({
     onSuccess: () => {
@@ -151,6 +159,7 @@ function LeadsContent() {
       country: newLead.country,
       source: newLead.source || undefined,
       notes: newLead.notes || undefined,
+      customFields: customFieldValues,
     });
   };
 
@@ -275,7 +284,37 @@ function LeadsContent() {
                   placeholder="Notas adicionales..."
                 />
               </div>
+
+              {customFieldDefs?.map((field: any) => (
+                <div key={field.id} className="grid gap-2">
+                  <Label htmlFor={`field-${field.id}`}>{field.name}</Label>
+                  {field.type === 'select' && field.options ? (
+                    <Select
+                      value={customFieldValues[field.id] || ""}
+                      onValueChange={(val) => setCustomFieldValues(prev => ({ ...prev, [field.id]: val }))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Seleccionar..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {field.options.map((opt: string) => (
+                          <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      id={`field-${field.id}`}
+                      type={field.type === 'number' ? 'number' : 'text'}
+                      value={customFieldValues[field.id] || ""}
+                      onChange={(e) => setCustomFieldValues(prev => ({ ...prev, [field.id]: e.target.value }))}
+                      placeholder={field.name}
+                    />
+                  )}
+                </div>
+              ))}
             </div>
+
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
@@ -303,16 +342,16 @@ function LeadsContent() {
               />
             </div>
 
-            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as LeadStatus | "all")}>
+            <Select value={stageFilter} onValueChange={(value) => setStageFilter(value)}>
               <SelectTrigger className="w-full sm:w-[180px]">
                 <Filter className="h-4 w-4 mr-2" />
-                <SelectValue placeholder="Filtrar por estado" />
+                <SelectValue placeholder="Filtrar por etapa" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos los estados</SelectItem>
-                {Object.entries(statusConfig).map(([key, config]) => (
-                  <SelectItem key={key} value={key}>
-                    {config.label}
+                <SelectItem value="all">Todas las etapas</SelectItem>
+                {stages.map((stage) => (
+                  <SelectItem key={stage.id} value={String(stage.id)}>
+                    {stage.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -377,8 +416,13 @@ function LeadsContent() {
                       </TableCell>
 
                       <TableCell>
-                        <Badge className={statusConfig[lead.status].className}>
-                          {statusConfig[lead.status].label}
+                        <Badge
+                          style={{
+                            backgroundColor: stages.find((s: any) => s.id === lead.pipelineStageId)?.color ?? "#e2e8f0",
+                            color: "#1e293b"
+                          }}
+                        >
+                          {stages.find((s: any) => s.id === lead.pipelineStageId)?.name || lead.status}
                         </Badge>
                       </TableCell>
 
@@ -408,18 +452,18 @@ function LeadsContent() {
                           </DropdownMenuTrigger>
 
                           <DropdownMenuContent align="end">
-                            {Object.entries(statusConfig).map(([status, config]) => (
+                            {stages.map((stage: any) => (
                               <DropdownMenuItem
-                                key={status}
+                                key={stage.id}
                                 onClick={() =>
                                   updateStatus.mutate({
                                     id: lead.id,
-                                    status: status as LeadStatus,
+                                    pipelineStageId: stage.id,
                                   })
                                 }
-                                disabled={lead.status === status}
+                                disabled={lead.pipelineStageId === stage.id}
                               >
-                                Marcar como {config.label}
+                                Mover a {stage.name}
                               </DropdownMenuItem>
                             ))}
 
@@ -440,6 +484,6 @@ function LeadsContent() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </div >
   );
 }

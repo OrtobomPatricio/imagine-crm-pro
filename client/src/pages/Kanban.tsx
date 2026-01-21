@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { trpc } from "@/lib/trpc";
 import {
   DndContext,
@@ -32,28 +32,9 @@ type Lead = {
   id: number;
   name: string;
   phone: string;
-  status: 'new' | 'contacted' | 'qualified' | 'negotiation' | 'won' | 'lost';
+  status: string; // kept for legacy display if needed, but we rely on pipelineStageId
+  pipelineStageId?: number | null;
   country: string;
-};
-
-type BoardData = Record<string, Lead[]>;
-
-const STATUSES = {
-  new: "Nuevo",
-  contacted: "Contactado",
-  qualified: "Calificado",
-  negotiation: "Negociación",
-  won: "Ganado",
-  lost: "Perdido",
-} as const;
-
-const STATUS_COLORS: Record<string, string> = {
-  new: "bg-blue-100 text-blue-800 border-blue-200",
-  contacted: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  qualified: "bg-purple-100 text-purple-800 border-purple-200",
-  negotiation: "bg-indigo-100 text-indigo-800 border-indigo-200",
-  won: "bg-green-100 text-green-800 border-green-200",
-  lost: "bg-red-100 text-red-800 border-red-200",
 };
 
 // -- Componente Tarjeta (Sortable Item) --
@@ -117,7 +98,24 @@ function KanbanColumn({ id, title, leads }: { id: string; title: string; leads: 
 
 // -- Página Principal --
 export default function KanbanBoard() {
-  const { data: leadsByStatus, isLoading, refetch } = trpc.leads.getByStatus.useQuery();
+  const [activePipelineId, setActivePipelineId] = useState<number | null>(null);
+
+  // Fetch pipelines
+  const { data: pipelines, isLoading: isLoadingPipelines } = trpc.pipelines.list.useQuery();
+
+  useEffect(() => {
+    if (pipelines && pipelines.length > 0 && !activePipelineId) {
+      const def = pipelines.find((p: any) => p.isDefault) || pipelines[0];
+      setActivePipelineId(def.id);
+    }
+  }, [pipelines, activePipelineId]);
+
+  // Fetch leads for active pipeline
+  const { data: leadsByStage, isLoading: isLoadingLeads, refetch } = trpc.leads.getByPipeline.useQuery(
+    { pipelineId: activePipelineId ?? undefined },
+    { enabled: !!activePipelineId }
+  );
+
   const updateStatus = trpc.leads.updateStatus.useMutation({
     onSuccess: () => {
       // toast.success("Estado actualizado");
@@ -125,22 +123,22 @@ export default function KanbanBoard() {
     },
     onError: (err) => {
       toast.error("Error al mover: " + err.message);
-      refetch(); // revert changes
+      refetch();
     }
   });
 
   const [activeDragItem, setActiveDragItem] = useState<Lead | null>(null);
 
-  // Sensores para detectar el arrastre
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), // evita clicks accidentales
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // Manejo del Drag & Drop
+  const activePipeline = pipelines?.find(p => p.id === activePipelineId);
+
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
-    const lead = active.data.current as Lead; // Pasamos datos en useSortable
+    const lead = active.data.current as Lead;
     setActiveDragItem(lead);
   };
 
@@ -150,24 +148,21 @@ export default function KanbanBoard() {
 
     if (!over) return;
 
-    // Si soltamos sobre un contenedor (columna) diferente al original
     const activeLead = active.data.current as Lead;
-    const overContainer = over.data.current?.sortable?.containerId || over.id; // contenedor destino
+    // over.id should be the stageId (column)
+    const overStageId = Number(over.data.current?.sortable?.containerId || over.id);
 
-    // Si es columna válida y diferente al estado actual
-    if (overContainer && Object.keys(STATUSES).includes(overContainer as string)) {
-      if (activeLead.status !== overContainer) {
-        // Actualizar en backend
+    if (overStageId && activePipeline?.stages.find(s => s.id === overStageId)) {
+      if (activeLead.pipelineStageId !== overStageId) {
         updateStatus.mutate({
           id: activeLead.id,
-          status: overContainer as any
+          pipelineStageId: overStageId
         });
-        // Nota: Podríamos hacer actualización optimista aquí para UX instantánea
       }
     }
   };
 
-  if (isLoading || !leadsByStatus) {
+  if (isLoadingPipelines || (activePipelineId && isLoadingLeads)) {
     return (
       <DashboardLayout>
         <div className="flex items-center justify-center h-full">Cargando tablero...</div>
@@ -175,12 +170,20 @@ export default function KanbanBoard() {
     );
   }
 
+  // Derived columns from active pipeline
+  const columns = activePipeline?.stages || [];
+
   return (
     <DashboardLayout>
       <div className="h-[calc(100vh-100px)] flex flex-col p-4">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold tracking-tight">Pipeline de Ventas</h1>
-          <p className="text-muted-foreground">Arrastra y suelta para gestionar tus leads.</p>
+        <div className="mb-6 flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Pipeline de Ventas</h1>
+            <p className="text-muted-foreground">
+              {activePipeline?.name || "Cargando..."}
+            </p>
+          </div>
+          {/* Pipeline Selector could go here */}
         </div>
 
         <DndContext
@@ -190,12 +193,12 @@ export default function KanbanBoard() {
           onDragEnd={handleDragEnd}
         >
           <div className="flex gap-4 h-full overflow-x-auto pb-4">
-            {Object.keys(STATUSES).map((statusKey) => (
+            {columns.map((stage) => (
               <KanbanColumn
-                key={statusKey}
-                id={statusKey}
-                title={STATUSES[statusKey as keyof typeof STATUSES]}
-                leads={(leadsByStatus as any)[statusKey] || []}
+                key={stage.id}
+                id={String(stage.id)} // DnD expects string IDs often, but we parse it back
+                title={stage.name}
+                leads={(leadsByStage as any)?.[stage.id] || []}
               />
             ))}
           </div>

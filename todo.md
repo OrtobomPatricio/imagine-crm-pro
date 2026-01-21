@@ -111,4 +111,4 @@
 - [x] Indicadores de estado (enviado, entregado, leído)
 
 ## Correcciones
-- [ ] Menú lateral izquierdo no aparece - corregir visibilidad
+- [x] Menú lateral izquierdo no aparece - corregir visibilidad

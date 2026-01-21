@@ -42,7 +42,8 @@ import {
   Phone,
   ChevronDown,
   ChevronRight,
-  Settings
+  Settings,
+  Database,
 } from "lucide-react";
 import { CSSProperties, ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
@@ -63,6 +64,7 @@ const menuItems = [
   { icon: BarChart3, label: "Analytics", path: "/analytics" },
   { icon: FileText, label: "Reportes", path: "/reports" },
   { icon: Workflow, label: "Integraciones", path: "/integrations" },
+  { icon: Database, label: "Backups", path: "/backup" },
   { icon: Settings, label: "Configuración", path: "/settings" },
 ];
 

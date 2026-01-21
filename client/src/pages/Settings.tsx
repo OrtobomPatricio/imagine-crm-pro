@@ -28,7 +28,7 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { useEffect, useMemo, useState } from "react";
 import { usePermissions } from "@/_core/hooks/usePermissions";
-import { AlertCircle, Key, Plus, Facebook } from "lucide-react";
+import { AlertCircle, Plus } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
@@ -38,7 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import FacebookSettings from "@/components/FacebookSettings";
+import { SecurityTabContent } from "@/components/SecurityTabContent";
 
 const TZ_OPTIONS = [
   "America/Asuncion",
@@ -137,6 +137,15 @@ function SettingsContent() {
     slotMinutes: 15,
     maxPerSlot: 6,
     allowCustomTime: true,
+    slaConfig: {
+      maxResponseTimeMinutes: 60,
+      alertEmail: "",
+      notifySupervisor: false
+    },
+    chatDistributionConfig: {
+      mode: "manual" as "manual" | "round_robin" | "all_agents",
+      excludeAgentIds: [] as number[],
+    }
   });
 
   const initialMatrix = useMemo(() => {
@@ -163,6 +172,15 @@ function SettingsContent() {
       slotMinutes: settingsQuery.data.scheduling?.slotMinutes ?? 15,
       maxPerSlot: settingsQuery.data.scheduling?.maxPerSlot ?? 6,
       allowCustomTime: settingsQuery.data.scheduling?.allowCustomTime ?? true,
+      slaConfig: (settingsQuery.data as any).slaConfig ?? {
+        maxResponseTimeMinutes: 60,
+
+        notifySupervisor: false
+      },
+      chatDistributionConfig: (settingsQuery.data as any).chatDistributionConfig ?? {
+        mode: "manual",
+        excludeAgentIds: [],
+      },
     });
 
     setMatrixText(JSON.stringify(initialMatrix, null, 2));
@@ -177,8 +195,13 @@ function SettingsContent() {
       currency: form.currency,
       scheduling: {
         slotMinutes: form.slotMinutes,
-        maxPerSlot: form.maxPerSlot,
+
         allowCustomTime: form.allowCustomTime,
+      },
+      slaConfig: form.slaConfig,
+      chatDistributionConfig: {
+        mode: form.chatDistributionConfig.mode as "manual" | "round_robin" | "all_agents",
+        excludeAgentIds: form.chatDistributionConfig.excludeAgentIds,
       },
     });
   };
@@ -224,12 +247,12 @@ function SettingsContent() {
       </div>
 
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 md:grid-cols-5">
+        <TabsList className="grid w-full grid-cols-3 md:grid-cols-6">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="team">Usuarios</TabsTrigger>
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
-          <TabsTrigger value="connections">Conexiones API</TabsTrigger>
-          <TabsTrigger value="facebook">Facebook</TabsTrigger>
+          <TabsTrigger value="distribution">Distribución</TabsTrigger>
+          <TabsTrigger value="security">Seguridad</TabsTrigger>
           <TabsTrigger value="perms" disabled={role !== "owner"}>Permisos</TabsTrigger>
         </TabsList>
 
@@ -332,14 +355,6 @@ function SettingsContent() {
           <DashboardConfigEditor />
         </TabsContent>
 
-        <TabsContent value="connections" className="space-y-4">
-          <ConnectionsSettings />
-        </TabsContent>
-
-        <TabsContent value="facebook" className="space-y-4">
-          <FacebookSettings />
-        </TabsContent>
-
         <TabsContent value="team" className="space-y-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
@@ -417,10 +432,134 @@ function SettingsContent() {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="sla" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Niveles de Servicio (SLA)</CardTitle>
+              <CardDescription>Define alertas cuando una conversación no es atendida a tiempo.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-2">
+                <Label>Tiempo Máximo de Respuesta (minutos)</Label>
+                <Input
+                  type="number"
+                  min={5}
+                  value={form.slaConfig?.maxResponseTimeMinutes ?? 60}
+                  onChange={(e) => setForm(p => ({ ...p, slaConfig: { ...(p.slaConfig || { notifySupervisor: false }), maxResponseTimeMinutes: parseInt(e.target.value) || 60 } }))}
+                />
+                <p className="text-sm text-muted-foreground">Si un cliente espera más de este tiempo, se generará una alerta.</p>
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <Switch
+                  checked={form.slaConfig?.notifySupervisor ?? false}
+                  onCheckedChange={(c) => setForm(p => ({ ...p, slaConfig: { ...(p.slaConfig || { maxResponseTimeMinutes: 60 }), notifySupervisor: c } }))}
+                />
+                <Label>Notificar al Supervisor (Email)</Label>
+              </div>
+
+              {(form.slaConfig?.notifySupervisor) && (
+                <div className="grid gap-2 pl-6 border-l-2">
+                  <Label>Email para Alertas</Label>
+                  <Input
+                    placeholder="supervisor@empresa.com"
+                    value={form.slaConfig?.alertEmail ?? ""}
+                    onChange={(e) => setForm(p => ({ ...p, slaConfig: { ...(p.slaConfig || { maxResponseTimeMinutes: 60, notifySupervisor: true }), alertEmail: e.target.value } }))}
+                  />
+                </div>
+              )}
+
+              <div className="flex justify-end pt-4">
+                <Button onClick={saveGeneral} disabled={updateGeneral.isPending}>
+                  {updateGeneral.isPending ? "Guardando..." : "Guardar Configuración SLA"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+
+        <TabsContent value="distribution">
+          <Card>
+            <CardHeader>
+              <CardTitle>Distribución de Chats</CardTitle>
+              <CardDescription>Configura cómo se asignan las nuevas conversaciones.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-2">
+                <Label>Modo de Asignación</Label>
+                <Select
+                  value={form.chatDistributionConfig.mode}
+                  onValueChange={(v: any) => setForm(p => ({
+                    ...p,
+                    chatDistributionConfig: { ...p.chatDistributionConfig, mode: v }
+                  }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manual">Manual (Sin asignación automática)</SelectItem>
+                    <SelectItem value="round_robin">Round Robin (Cíclico)</SelectItem>
+                    {/* <SelectItem value="all_agents">Todos (Broadcast)</SelectItem> */}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {form.chatDistributionConfig.mode === 'round_robin' && (
+                <div className="space-y-2 border rounded-lg p-4">
+                  <Label>Excluir Agentes del Ciclo</Label>
+                  <p className="text-sm text-muted-foreground">Selecciona quiénes NO deben recibir chats automáticamente.</p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                    {(teamQuery.data ?? []).filter(u => u.isActive && u.role !== 'viewer').map(u => {
+                      const isExcluded = form.chatDistributionConfig.excludeAgentIds.includes(u.id);
+                      return (
+                        <div key={u.id} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={`exclude-${u.id}`}
+                            checked={isExcluded}
+                            onCheckedChange={(c) => {
+                              setForm(p => {
+                                const current = p.chatDistributionConfig.excludeAgentIds;
+                                const next = c
+                                  ? [...current, u.id]
+                                  : current.filter(id => id !== u.id);
+                                return {
+                                  ...p,
+                                  chatDistributionConfig: { ...p.chatDistributionConfig, excludeAgentIds: next }
+                                };
+                              });
+                            }}
+                          />
+                          <Label htmlFor={`exclude-${u.id}`} className="cursor-pointer">
+                            {u.name} ({u.role})
+                          </Label>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end pt-4">
+                <Button onClick={saveGeneral} disabled={updateGeneral.isPending}>
+                  {updateGeneral.isPending ? "Guardando..." : "Guardar Configuración"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="security" className="space-y-4">
+          <SecurityTabContent />
+        </TabsContent>
       </Tabs>
     </div>
   );
 }
+
 
 function DashboardConfigEditor() {
   const query = trpc.settings.get.useQuery();
@@ -489,186 +628,9 @@ function DashboardConfigEditor() {
   );
 }
 
-function ConnectionsSettings() {
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [open, setOpen] = useState(false);
-
-  const numbersQuery = trpc.whatsappNumbers.list.useQuery();
-
-  const updateCreds = trpc.whatsappNumbers.updateCredentials.useMutation({
-    onSuccess: () => {
-      toast.success("Credenciales actualizadas");
-      setOpen(false);
-      setEditingId(null);
-      numbersQuery.refetch();
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  const selectedNumber = numbersQuery.data?.find((n) => n.id === editingId);
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Conexiones WhatsApp</CardTitle>
-        <CardDescription>
-          Gestiona las credenciales de la API de WhatsApp Cloud para cada número.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {numbersQuery.isLoading && <div className="text-sm">Cargando números...</div>}
-
-        <div className="grid gap-4">
-          {numbersQuery.data?.map((num) => (
-            <div
-              key={num.id}
-              className="flex items-center justify-between p-4 border rounded-lg bg-card hover:bg-accent/5 transition-colors"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">{num.phoneNumber}</span>
-                  {num.displayName && <span className="text-muted-foreground">({num.displayName})</span>}
-                </div>
-                <div className="flex items-center gap-2 text-xs">
-                  <div className={`w-2 h-2 rounded-full ${num.isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                  <span className="text-muted-foreground">
-                    {num.isConnected ? "Conectado" : "Desconectado"}
-                  </span>
-                  <span className="text-muted-foreground">•</span>
-                  <span className="text-muted-foreground">{num.country}</span>
-                </div>
-              </div>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setEditingId(num.id);
-                  setOpen(true);
-                }}
-              >
-                <Key className="w-4 h-4 mr-2" />
-                Configurar
-              </Button>
-            </div>
-          ))}
-        </div>
-
-        {numbersQuery.data?.length === 0 && (
-          <Alert>
-            <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Sin números</AlertTitle>
-            <AlertDescription>
-              No hay números de WhatsApp registrados. Contacta a soporte para agregar uno.
-            </AlertDescription>
-          </Alert>
-        )}
-      </CardContent>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Configurar API WhatsApp</DialogTitle>
-            <DialogDescription>
-              Ingresa los datos del Meta for Developers dashboard.
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedNumber && (
-            <CredentialForm
-              numberId={selectedNumber.id}
-              onSubmit={(data) => updateCreds.mutate({ id: selectedNumber.id, ...data })}
-              isLoading={updateCreds.isPending}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </Card>
-  );
-}
-
-function CredentialForm({ numberId, onSubmit, isLoading }: { numberId: number, onSubmit: (data: any) => void, isLoading: boolean }) {
-  const detailsQuery = trpc.whatsappNumbers.getById.useQuery({ id: numberId }, {
-    enabled: !!numberId,
-    refetchOnWindowFocus: false
-  });
-
-  const [formData, setFormData] = useState({
-    phoneNumberId: "",
-    businessAccountId: "",
-    accessToken: "",
-  });
-
-  useEffect(() => {
-    if (detailsQuery.data) {
-      setFormData({
-        phoneNumberId: detailsQuery.data.phoneNumberId || "",
-        businessAccountId: detailsQuery.data.businessAccountId || "",
-        accessToken: "",
-      });
-    }
-  }, [detailsQuery.data]);
-
-  return (
-    <div className="space-y-4 py-4">
-      {detailsQuery.isLoading ? (
-        <div className="text-center py-4">Cargando datos...</div>
-      ) : (
-        <>
-          <div className="grid gap-2">
-            <Label>Phone Number ID</Label>
-            <Input
-              value={formData.phoneNumberId}
-              onChange={(e) => setFormData(p => ({ ...p, phoneNumberId: e.target.value }))}
-              placeholder="Ej: 1056..."
-            />
-          </div>
-
-          <div className="grid gap-2">
-            <Label>WhatsApp Business Account ID</Label>
-            <Input
-              value={formData.businessAccountId}
-              onChange={(e) => setFormData(p => ({ ...p, businessAccountId: e.target.value }))}
-              placeholder="Ej: 1023..."
-            />
-          </div>
-
-          <div className="grid gap-2">
-            <Label>Access Token (Permanente)</Label>
-            <Input
-              type="password"
-              value={formData.accessToken}
-              onChange={(e) => setFormData(p => ({ ...p, accessToken: e.target.value }))}
-              placeholder={detailsQuery.data?.hasAccessToken ? "•••••••• (Guardado)" : "EAAG..."}
-            />
-            <p className="text-[10px] text-muted-foreground">
-              Dejalo vacío para mantener el token actual.
-            </p>
-          </div>
-
-          <div className="pt-2">
-            <div className="text-xs text-muted-foreground bg-muted p-2 rounded border">
-              <strong>Webhook Callback:</strong> <br />
-              <span className="font-mono select-all">https://{window.location.host}/api/whatsapp/webhook</span>
-              <br /><br />
-              <strong>Verify Token:</strong> <br />
-              <span className="font-mono select-all">happy-crm-token</span>
-            </div>
-          </div>
-        </>
-      )}
-
-      <DialogFooter>
-        <Button onClick={() => onSubmit(formData)} disabled={isLoading || detailsQuery.isLoading}>
-          {isLoading ? "Guardando..." : "Guardar Credenciales"}
-        </Button>
-      </DialogFooter>
-    </div>
-  );
-}
-
 function AddUserDialog({ onSuccess }: { onSuccess: () => void }) {
   const [open, setOpen] = useState(false);
+  const [isInvite, setIsInvite] = useState(true); // Default to invite
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -686,13 +648,38 @@ function AddUserDialog({ onSuccess }: { onSuccess: () => void }) {
     onError: (e) => toast.error(e.message),
   });
 
+  const inviteUser = trpc.team.invite.useMutation({
+    onSuccess: () => {
+      toast.success("Invitación enviada exitosamente");
+      setOpen(false);
+      setFormData({ name: "", email: "", password: "", role: "agent" });
+      onSuccess();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+
   const handleSubmit = () => {
-    if (!formData.name || !formData.email || !formData.password) {
-      toast.error("Complete todos los campos requeridos");
+    if (!formData.name || !formData.email) {
+      toast.error("Nombre y Email son requeridos");
       return;
     }
-    createUser.mutate(formData);
+
+    if (isInvite) {
+      inviteUser.mutate({
+        name: formData.name,
+        email: formData.email,
+        role: formData.role
+      });
+    } else {
+      if (!formData.password) {
+        toast.error("La contraseña es requerida para creación manual");
+        return;
+      }
+      createUser.mutate(formData);
+    }
   };
+
+  const isPending = createUser.isPending || inviteUser.isPending;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -706,10 +693,16 @@ function AddUserDialog({ onSuccess }: { onSuccess: () => void }) {
         <DialogHeader>
           <DialogTitle>Nuevo Usuario</DialogTitle>
           <DialogDescription>
-            Creá un nuevo acceso para tu equipo.
+            Invitá a un miembro del equipo o crealo manualmente.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
+
+        <div className="flex items-center space-x-2 pb-4">
+          <Switch id="invite-mode" checked={isInvite} onCheckedChange={setIsInvite} />
+          <Label htmlFor="invite-mode">Enviar invitación por correo</Label>
+        </div>
+
+        <div className="grid gap-4 py-2">
           <div className="grid gap-2">
             <Label htmlFor="name">Nombre</Label>
             <Input
@@ -729,16 +722,20 @@ function AddUserDialog({ onSuccess }: { onSuccess: () => void }) {
               placeholder="juan@empresa.com"
             />
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="password">Contraseña</Label>
-            <Input
-              id="password"
-              type="password"
-              value={formData.password}
-              onChange={(e) => setFormData(p => ({ ...p, password: e.target.value }))}
-              placeholder="••••••••"
-            />
-          </div>
+
+          {!isInvite && (
+            <div className="grid gap-2">
+              <Label htmlFor="password">Contraseña</Label>
+              <Input
+                id="password"
+                type="password"
+                value={formData.password}
+                onChange={(e) => setFormData(p => ({ ...p, password: e.target.value }))}
+                placeholder="••••••••"
+              />
+            </div>
+          )}
+
           <div className="grid gap-2">
             <Label>Rol</Label>
             <Select
@@ -758,14 +755,15 @@ function AddUserDialog({ onSuccess }: { onSuccess: () => void }) {
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={handleSubmit} disabled={createUser.isPending}>
-            {createUser.isPending ? "Creando..." : "Crear Usuario"}
+          <Button onClick={handleSubmit} disabled={isPending}>
+            {isPending ? "Procesando..." : (isInvite ? "Enviar Invitación" : "Crear Usuario")}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
+
 
 function PermissionsMatrixEditor({
   initialMatrix,
@@ -778,82 +776,154 @@ function PermissionsMatrixEditor({
 }) {
   const [matrix, setMatrix] = useState(initialMatrix);
 
-  // Sync state if initial changes (e.g. fetch finishes)
   useEffect(() => {
     setMatrix(initialMatrix);
   }, [initialMatrix]);
 
   const ROLES = ["admin", "supervisor", "agent", "viewer"] as const;
+
   const DOMAINS = [
-    { key: "dashboard", label: "Dashboard" },
-    { key: "leads", label: "Leads" },
-    { key: "kanban", label: "Kanban" },
-    { key: "chat", label: "Chat" },
-    { key: "scheduling", label: "Agenda" },
-    { key: "monitoring", label: "Monitoreo" },
-    { key: "analytics", label: "Analíticas" },
-    { key: "reports", label: "Reportes" },
-    { key: "integrations", label: "Integraciones" },
-    { key: "settings", label: "Configuración" },
-    { key: "users", label: "Usuarios" },
+    { key: "dashboard", label: "Dashboard", actions: ["view"] }, // Dashboard usually just view
+    { key: "leads", label: "Leads", actions: ["view", "create", "update", "delete"] },
+    { key: "kanban", label: "Kanban", actions: ["view", "create", "update", "delete"] },
+    { key: "chat", label: "Chat", actions: ["view", "send"] },
+    { key: "campaigns", label: "Campañas", actions: ["view", "create", "update", "delete"] },
+    { key: "scheduling", label: "Agenda", actions: ["view", "create", "update", "delete"] },
+    { key: "monitoring", label: "Monitoreo", actions: ["view", "manage"] },
+    { key: "analytics", label: "Analíticas", actions: ["view"] },
+    { key: "reports", label: "Reportes", actions: ["view", "export"] },
+    { key: "integrations", label: "Integraciones", actions: ["view", "manage"] },
+    { key: "settings", label: "Configuración", actions: ["view", "manage"] },
+    { key: "users", label: "Usuarios", actions: ["view", "manage"] },
   ];
 
-  const togglePermission = (role: string, domainKey: string, checked: boolean) => {
+  const ACTION_LABELS: Record<string, string> = {
+    view: "Ver",
+    create: "Crear",
+    update: "Editar",
+    delete: "Eliminar",
+    send: "Enviar",
+    export: "Exportar",
+    manage: "Gestionar"
+  };
+
+  const hasPermission = (role: string, domain: string, action: string) => {
+    const perms = matrix[role] || [];
+    if (perms.includes("*")) return true;
+    if (perms.includes(`${domain}.*`)) return true;
+    return perms.includes(`${domain}.${action}`);
+  };
+
+  const togglePermission = (role: string, domain: string, action: string, checked: boolean) => {
     setMatrix(prev => {
-      const current = new Set(prev[role] || []);
-      const wildcard = `${domainKey}.*`;
-      const view = `${domainKey}.view`;
+      let current = [...(prev[role] || [])];
+      const wildcard = `${domain}.*`;
+      const specific = `${domain}.${action}`;
+
+      if (current.includes("*")) return prev; // Owner immutable via UI usually
 
       if (checked) {
-        current.add(wildcard);
-        current.delete(view);
+        if (!current.includes(specific) && !current.includes(wildcard)) {
+          current.push(specific);
+        }
       } else {
-        current.delete(wildcard);
-        current.delete(view);
+        if (current.includes(wildcard)) {
+          // Break wildcard into all specific except the one being removed
+          current = current.filter(p => p !== wildcard);
+          const domainConfig = DOMAINS.find(d => d.key === domain);
+          if (domainConfig) {
+            domainConfig.actions.forEach(a => {
+              if (a !== action) current.push(`${domain}.${a}`);
+            });
+          }
+        } else {
+          current = current.filter(p => p !== specific);
+        }
       }
-
-      return { ...prev, [role]: Array.from(current) };
+      return { ...prev, [role]: current };
     });
   };
 
-  const hasPermission = (role: string, domainKey: string) => {
-    const permissions = matrix[role] || [];
-    return permissions.includes(`${domainKey}.*`) || permissions.includes("*");
+  const toggleAllInDomain = (role: string, domain: string, checked: boolean) => {
+    setMatrix(prev => {
+      let current = [...(prev[role] || [])];
+      const wildcard = `${domain}.*`;
+
+      if (current.includes("*")) return prev;
+
+      current = current.filter(p => !p.startsWith(`${domain}.`));
+
+      if (checked) {
+        current.push(wildcard);
+      }
+
+      return { ...prev, [role]: current };
+    });
   };
 
   return (
     <div className="space-y-4">
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[150px]">Módulo</TableHead>
-              {ROLES.map(role => (
-                <TableHead key={role} className="text-center capitalize">
-                  {role === 'agent' ? 'Agente' : role}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {DOMAINS.map((domain) => (
-              <TableRow key={domain.key}>
-                <TableCell className="font-medium">{domain.label}</TableCell>
-                {ROLES.map(role => (
-                  <TableCell key={role} className="text-center flex align-center items-center justify-center">
-                    <div className="flex justify-center">
-                      <Checkbox
-                        checked={hasPermission(role, domain.key)}
-                        onCheckedChange={(c) => togglePermission(role, domain.key, c as boolean)}
-                      />
-                    </div>
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <Tabs defaultValue="agent" className="w-full">
+        <TabsList className="grid w-full grid-cols-4">
+          {ROLES.map(role => (
+            <TabsTrigger key={role} value={role} className="capitalize">
+              {role === 'agent' ? 'Agente' : role}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        {ROLES.map(role => (
+          <TabsContent key={role} value={role} className="mt-4">
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[180px]">Módulo</TableHead>
+                    <TableHead className="text-center">Todo</TableHead>
+                    <TableHead>Acciones Específicas</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {DOMAINS.map((domain) => {
+                    const allChecked = matrix[role]?.includes(`${domain}.*`) || matrix[role]?.includes("*");
+
+                    return (
+                      <TableRow key={domain.key}>
+                        <TableCell className="font-medium">{domain.label}</TableCell>
+                        <TableCell className="text-center">
+                          <Checkbox
+                            checked={allChecked}
+                            onCheckedChange={(c) => toggleAllInDomain(role, domain.key, c as boolean)}
+                            disabled={matrix[role]?.includes("*")}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-4">
+                            {domain.actions.map(action => (
+                              <div key={action} className="flex items-center space-x-2">
+                                <Checkbox
+                                  id={`${role}-${domain.key}-${action}`}
+                                  checked={hasPermission(role, domain.key, action)}
+                                  onCheckedChange={(c) => togglePermission(role, domain.key, action, c as boolean)}
+                                  disabled={allChecked || matrix[role]?.includes("*")}
+                                />
+                                <Label htmlFor={`${role}-${domain.key}-${action}`} className="cursor-pointer">
+                                  {ACTION_LABELS[action]}
+                                </Label>
+                              </div>
+                            ))}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+        ))}
+      </Tabs>
+
       <div className="flex justify-end">
         <Button onClick={() => onSave(matrix)} disabled={isLoading}>
           {isLoading ? "Guardando..." : "Guardar Cambios"}

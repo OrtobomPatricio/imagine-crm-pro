@@ -33,12 +33,14 @@ import { cn } from "@/lib/utils";
 export default function Scheduling() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [isNewAppointmentOpen, setIsNewAppointmentOpen] = useState(false);
+
+  const [isDayViewOpen, setIsDayViewOpen] = useState(false);
 
   // Dialogs
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
   const [isReasonsDialogOpen, setIsReasonsDialogOpen] = useState(false);
+  const [isNewAppointmentOpen, setIsNewAppointmentOpen] = useState(false);
 
   // Form State
   const [firstName, setFirstName] = useState("");
@@ -87,7 +89,7 @@ export default function Scheduling() {
     setPhone("");
     setEmail("");
     setReasonId("");
-    setAppointmentTime("");
+    if (!appointmentTime) setAppointmentTime("09:00");
     setNotes("");
   };
 
@@ -149,6 +151,29 @@ export default function Scheduling() {
     });
   };
 
+  const handleDayClick = (day: Date) => {
+    setSelectedDate(day);
+    setIsDayViewOpen(true);
+  };
+
+  const openNewAppointment = (date?: Date) => {
+    if (date) setSelectedDate(date);
+    // If no date selected, default to today or keep previous
+    if (!selectedDate && !date) setSelectedDate(new Date());
+
+    // Reset form but keep date
+    setFirstName("");
+    setLastName("");
+    setPhone("");
+    setEmail("");
+    setReasonId("");
+    if (!appointmentTime) setAppointmentTime("09:00");
+    setNotes("");
+
+    setIsDayViewOpen(false); // Close day view if open
+    setIsNewAppointmentOpen(true);
+  };
+
   return (
     <DashboardLayout>
       <div className="p-6 space-y-6">
@@ -158,6 +183,10 @@ export default function Scheduling() {
             <p className="text-muted-foreground">Gestiona tus citas y recordatorios</p>
           </div>
           <div className="flex gap-2">
+            <Button onClick={() => openNewAppointment(new Date())}>
+              <Plus className="w-4 h-4 mr-2" />
+              Nueva Cita
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setIsConfigOpen(true)}>
               <Settings className="w-4 h-4 mr-2" />
               Configurar
@@ -173,6 +202,7 @@ export default function Scheduling() {
           </div>
         </div>
 
+        {/* ... Dialogs for Config, Templates, Reasons remain same ... */}
         <Dialog open={isConfigOpen} onOpenChange={setIsConfigOpen}>
           <DialogContent>
             <DialogHeader>
@@ -238,12 +268,7 @@ export default function Scheduling() {
                   return (
                     <div
                       key={dateKey}
-                      onClick={() => {
-                        setSelectedDate(day);
-                        setIsNewAppointmentOpen(true);
-                        resetForm();
-                        if (!appointmentTime) setAppointmentTime("09:00");
-                      }}
+                      onClick={() => handleDayClick(day)}
                       className={cn(
                         "h-24 p-1 rounded-lg cursor-pointer transition-all border relative",
                         isSelected ? "bg-primary/10 border-primary" : "bg-card hover:bg-accent/50 border-transparent",
@@ -282,60 +307,105 @@ export default function Scheduling() {
 
           <Card className="h-fit">
             <CardHeader>
-              <CardTitle>
-                {selectedDate ? format(selectedDate, "EEEE d 'de' MMMM", { locale: es }) : "Detalles"}
-              </CardTitle>
+              <CardTitle>Próximas Citas</CardTitle>
             </CardHeader>
             <CardContent>
-              {!selectedDate ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  Selecciona un día para ver o crear citas
+              <div className="space-y-4">
+                {/* Upcoming appointments list (simplified) */}
+                <div className="text-sm text-muted-foreground">
+                  Selecciona un día en el calendario para ver detalles.
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  <Button className="w-full" onClick={() => setIsNewAppointmentOpen(true)}>
-                    <Plus className="w-4 h-4 mr-2" /> Nueva Cita
-                  </Button>
-
-                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
-                    {selectedDateAppointments.length === 0 && (
-                      <p className="text-sm text-center text-muted-foreground py-4">No hay citas para este día</p>
-                    )}
-                    {selectedDateAppointments.map(apt => {
-                      const reason = reasons.find(r => r.id === apt.reasonId);
-                      return (
-                        <div key={apt.id} className="flex flex-col gap-1 p-3 rounded-lg border bg-card">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <Clock className="w-3 h-3 text-muted-foreground" />
-                              <span className="font-medium text-sm">{apt.appointmentTime}</span>
-                            </div>
-                            {reason && (
-                              <div
-                                className="w-2 h-2 rounded-full"
-                                style={{ backgroundColor: reason.color }}
-                              />
-                            )}
-                          </div>
-                          <div className="font-medium">{apt.firstName} {apt.lastName}</div>
-                          <div className="text-xs text-muted-foreground">{apt.phone}</div>
-                          {apt.notes && <div className="text-xs text-muted-foreground mt-1 italic">"{apt.notes}"</div>}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+              </div>
             </CardContent>
           </Card>
         </div>
 
+        {/* Day View Dialog */}
+        <Dialog open={isDayViewOpen} onOpenChange={setIsDayViewOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="capitalize">
+                {selectedDate ? format(selectedDate, "EEEE d 'de' MMMM", { locale: es }) : "Detalles del día"}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="py-4">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="font-semibold text-lg">Citas Programadas</h3>
+                <Button onClick={() => openNewAppointment(selectedDate || new Date())}>
+                  <Plus className="w-4 h-4 mr-2" /> Nueva Cita
+                </Button>
+              </div>
+
+              <div className="border rounded-md">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr className="text-left border-b">
+                      <th className="p-3 font-medium">Hora</th>
+                      <th className="p-3 font-medium">Cliente</th>
+                      <th className="p-3 font-medium">Motivo</th>
+                      <th className="p-3 font-medium">Notas</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedDateAppointments.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-8 text-center text-muted-foreground">
+                          No hay citas para este día.
+                        </td>
+                      </tr>
+                    ) : (
+                      selectedDateAppointments
+                        .sort((a, b) => a.appointmentTime.localeCompare(b.appointmentTime))
+                        .map(apt => {
+                          const reason = reasons.find(r => r.id === apt.reasonId);
+                          return (
+                            <tr key={apt.id} className="border-b last:border-0 hover:bg-muted/50">
+                              <td className="p-3 font-medium">{apt.appointmentTime}</td>
+                              <td className="p-3">
+                                <div className="font-medium">{apt.firstName} {apt.lastName}</div>
+                                <div className="text-xs text-muted-foreground">{apt.phone}</div>
+                              </td>
+                              <td className="p-3">
+                                {reason && (
+                                  <span className="inline-flex items-center px-2 py-1 rounded-full text-xs"
+                                    style={{ backgroundColor: `${reason.color ?? '#3b82f6'}20`, color: reason.color ?? '#3b82f6' }}>
+                                    {reason.name}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 text-muted-foreground max-w-[200px] truncate">
+                                {apt.notes || "-"}
+                              </td>
+                            </tr>
+                          )
+                        })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* New Appointment Dialog */}
         <Dialog open={isNewAppointmentOpen} onOpenChange={setIsNewAppointmentOpen}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Nueva Cita</DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label>Fecha</Label>
+                <Input
+                  type="date"
+                  value={selectedDate ? format(selectedDate, "yyyy-MM-dd") : ""}
+                  onChange={(e) => {
+                    const d = new Date(e.target.value + "T12:00:00"); // Avoid timezone shift
+                    setSelectedDate(d);
+                  }}
+                />
+              </div>
+
               <div className="space-y-2">
                 <Label>Buscar Contacto (Opcional)</Label>
                 <LeadSearchCombobox onSelect={handleLeadSelect} />
