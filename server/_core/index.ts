@@ -147,6 +147,16 @@ async function startServer() {
         }
       }
 
+      // VITAL: Compare with the actual SDK function used by TRPC
+      let sdkAuthResult = "not_attempted";
+      try {
+        const { sdk } = await import("./sdk");
+        const user = await sdk.authenticateRequest(req);
+        sdkAuthResult = user ? "success_user_found" : "failed_null_user";
+      } catch (e: any) {
+        sdkAuthResult = `failed_error: ${e.message || String(e)}`;
+      }
+
       res.json({
         timestamp: new Date().toISOString(),
         headers: {
@@ -165,7 +175,8 @@ async function startServer() {
         db: dbStatus,
         session: {
           status: sessionStatus,
-          decoded_openid: decoded?.openId || null
+          decoded_openid: decoded?.openId || null,
+          sdk_direct_check: sdkAuthResult
         }
       });
     } catch (e) {
