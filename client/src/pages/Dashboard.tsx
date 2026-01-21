@@ -4,10 +4,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { trpc } from "@/lib/trpc";
 import { useLocation } from "wouter";
-import { 
-  Users, 
-  MessageCircle, 
-  Phone, 
+import {
+  Users,
+  MessageCircle,
+  Phone,
   TrendingUp,
   AlertTriangle,
   CheckCircle2,
@@ -52,129 +52,145 @@ interface RecentLead {
 
 // Quick Actions configuration - hoverColor matches icon color
 const quickActions = [
-  { 
-    icon: Users, 
-    label: "Gestionar Leads", 
+  {
+    key: "leads",
+    icon: Users,
+    label: "Gestionar Leads",
     description: "Importa, organiza y segmenta tus prospectos",
     path: "/leads",
     iconColor: "icon-container-blue",
     hoverColor: "hover-blue"
   },
-  { 
-    icon: Send, 
-    label: "Crear Campaña", 
+  {
+    key: "campaigns",
+    icon: Send,
+    label: "Crear Campaña",
     description: "Diseña y lanza campañas de mensajes masivos",
     path: "/campaigns",
     iconColor: "icon-container-pink",
     hoverColor: "hover-pink"
   },
-  { 
-    icon: MessageSquare, 
-    label: "Conversaciones", 
+  {
+    key: "conversations",
+    icon: MessageSquare,
+    label: "Conversaciones",
     description: "Chat completo estilo WhatsApp",
     path: "/chat",
     iconColor: "icon-container-purple",
     hoverColor: "hover-purple"
   },
-  { 
-    icon: UserCheck, 
-    label: "Atendentes", 
+  {
+    key: "attendants",
+    icon: UserCheck,
+    label: "Atendentes",
     description: "Administra tu equipo de atención",
     path: "/leads",
     iconColor: "icon-container-red",
     hoverColor: "hover-red"
   },
-  { 
-    icon: Shield, 
-    label: "Salud de Cuentas", 
+  {
+    key: "health",
+    icon: Shield,
+    label: "Salud de Cuentas",
     description: "Monitor de detección de bloqueos",
     path: "/monitoring",
     iconColor: "icon-container-orange",
     hoverColor: "hover-orange"
   },
-  { 
-    icon: Phone, 
-    label: "Cuentas WhatsApp", 
+  {
+    key: "whatsapp",
+    icon: Phone,
+    label: "Cuentas WhatsApp",
     description: "Monitorea tus 42 números conectados",
     path: "/monitoring",
     iconColor: "icon-container-green",
     hoverColor: "hover-green"
   },
-  { 
-    icon: LayoutGrid, 
-    label: "Integraciones", 
+  {
+    key: "integrations",
+    icon: LayoutGrid,
+    label: "Integraciones",
     description: "Configura Chatwoot, n8n y más",
     path: "/integrations",
     iconColor: "icon-container-purple",
     hoverColor: "hover-purple"
   },
-  { 
-    icon: LayoutGrid, 
-    label: "Kanban Board", 
+  {
+    key: "kanban",
+    icon: LayoutGrid,
+    label: "Kanban Board",
     description: "Gestiona leads con arrastrar y soltar",
     path: "/kanban",
     iconColor: "icon-container-pink",
     hoverColor: "hover-pink"
   },
-  { 
-    icon: DollarSign, 
-    label: "Comisiones", 
+  {
+    key: "commissions",
+    icon: DollarSign,
+    label: "Comisiones",
     description: "Acompaña tus ganancias por país",
     path: "/analytics",
     iconColor: "icon-container-yellow",
     hoverColor: "hover-yellow"
   },
-  { 
-    icon: Target, 
-    label: "Metas de Vendas", 
+  {
+    key: "goals",
+    icon: Target,
+    label: "Metas de Vendas",
     description: "Progreso y ranking del equipo",
     path: "/analytics",
     iconColor: "icon-container-orange",
     hoverColor: "hover-orange"
   },
-  { 
-    icon: Trophy, 
-    label: "Logros", 
+  {
+    key: "achievements",
+    icon: Trophy,
+    label: "Logros",
     description: "Badges y conquistas desbloqueadas",
     path: "/analytics",
     iconColor: "icon-container-red",
     hoverColor: "hover-red"
   },
-  { 
-    icon: Flame, 
-    label: "Warm-up", 
+  {
+    key: "warmup",
+    icon: Flame,
+    label: "Warm-up",
     description: "Calendario de 28 días hasta 1000 msgs",
     path: "/monitoring",
     iconColor: "icon-container-orange",
     hoverColor: "hover-orange"
   },
-  { 
-    icon: BarChart3, 
-    label: "Analytics", 
+  {
+    key: "analytics",
+    icon: BarChart3,
+    label: "Analytics",
     description: "Tasas de apertura y heatmap de horarios",
     path: "/analytics",
     iconColor: "icon-container-blue",
     hoverColor: "hover-blue"
   },
-  { 
-    icon: Calendar, 
-    label: "Agendamiento", 
+  {
+    key: "scheduling",
+    icon: Calendar,
+    label: "Agendamiento",
     description: "Gestiona citas y reuniones en calendario",
     path: "/scheduling",
     iconColor: "icon-container-green",
     hoverColor: "hover-green"
   },
-  { 
-    icon: Activity, 
-    label: "Monitoreo en Vivo", 
+  {
+    key: "monitoring",
+    icon: Activity,
+    label: "Monitoreo en Vivo",
     description: "Dashboard en tiempo real con alertas",
     path: "/monitoring",
     iconColor: "icon-container-cyan",
     hoverColor: "hover-cyan"
   },
-  { 
-    icon: FileText, 
-    label: "Reportes", 
+  {
+    key: "reports",
+    icon: FileText,
+    label: "Reportes",
     description: "Analiza el desempeño de tus campañas",
     path: "/reports",
     iconColor: "icon-container-pink",
@@ -193,7 +209,12 @@ export default function Dashboard() {
 function DashboardContent() {
   const { user } = useAuth();
   const { data: stats } = trpc.dashboard.getStats.useQuery();
+  const { data: settings } = trpc.settings.get.useQuery();
   const [, setLocation] = useLocation();
+
+  // Filter quick actions based on dashboard config
+  const dashboardConfig = (settings?.dashboardConfig as Record<string, boolean>) ?? {};
+  const visibleActions = quickActions.filter(action => dashboardConfig[action.key] !== false);
 
   const statCards = [
     {
@@ -295,8 +316,8 @@ function DashboardContent() {
                       Día {number.warmupDay}/28
                     </span>
                   </div>
-                  <Progress 
-                    value={(number.warmupDay / 28) * 100} 
+                  <Progress
+                    value={(number.warmupDay / 28) * 100}
                     className="h-2"
                   />
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -352,8 +373,8 @@ function DashboardContent() {
               <h4 className="text-sm font-medium mb-3">Distribución por País</h4>
               <div className="grid grid-cols-2 gap-2">
                 {countriesDistribution.map((country: CountryDistribution) => (
-                  <div 
-                    key={country.country} 
+                  <div
+                    key={country.country}
                     className="flex items-center justify-between bg-muted/30 rounded-lg px-3 py-2"
                   >
                     <span className="text-sm">{country.country}</span>
@@ -370,9 +391,9 @@ function DashboardContent() {
       <div>
         <h2 className="text-xl font-semibold mb-4">Acciones Rápidas</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {quickActions.map((action, index) => (
+          {visibleActions.map((action) => (
             <div
-              key={index}
+              key={action.key}
               onClick={() => setLocation(action.path)}
               className={`action-card group ${action.hoverColor}`}
             >
@@ -411,8 +432,8 @@ function DashboardContent() {
               </p>
             ) : (
               recentLeads.map((lead: RecentLead) => (
-                <div 
-                  key={lead.id} 
+                <div
+                  key={lead.id}
                   className="flex items-center justify-between p-3 bg-muted/30 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
                   onClick={() => setLocation('/leads')}
                 >

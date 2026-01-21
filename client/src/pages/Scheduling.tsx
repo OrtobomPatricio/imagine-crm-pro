@@ -1,14 +1,16 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
@@ -16,27 +18,29 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
-  Clock,
-  User,
-  Phone,
-  Mail,
   Settings,
-  X,
-  Edit,
-  Trash2
+  Trash2,
+  Check,
+  ChevronsUpDown,
+  Search,
+  MessageSquare,
+  Clock
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths } from "date-fns";
 import { es } from "date-fns/locale";
+import { cn } from "@/lib/utils";
 
 export default function Scheduling() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [isNewAppointmentOpen, setIsNewAppointmentOpen] = useState(false);
-  const [isReasonsDialogOpen, setIsReasonsDialogOpen] = useState(false);
-  const [newReason, setNewReason] = useState("");
-  const [newReasonColor, setNewReasonColor] = useState("#3b82f6");
 
-  // Form state
+  // Dialogs
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isTemplatesOpen, setIsTemplatesOpen] = useState(false);
+  const [isReasonsDialogOpen, setIsReasonsDialogOpen] = useState(false);
+
+  // Form State
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [phone, setPhone] = useState("");
@@ -48,7 +52,7 @@ export default function Scheduling() {
   // Queries
   const { data: appointments = [], refetch: refetchAppointments } = trpc.scheduling.list.useQuery();
   const { data: reasons = [], refetch: refetchReasons } = trpc.scheduling.listReasons.useQuery();
-  const { data: schedRules } = trpc.settings.getScheduling.useQuery(undefined, {
+  const { data: schedRules, refetch: refetchRules } = trpc.settings.getScheduling.useQuery(undefined, {
     refetchOnWindowFocus: false,
   });
 
@@ -60,30 +64,19 @@ export default function Scheduling() {
       resetForm();
       setIsNewAppointmentOpen(false);
     },
-    onError: (error) => {
-      toast.error("Error al agendar: " + error.message);
-    },
+    onError: (error) => toast.error("Error al agendar: " + error.message),
   });
 
-  const deleteAppointment = trpc.scheduling.delete.useMutation({
+  const deleteReason = trpc.scheduling.deleteReason.useMutation({
     onSuccess: () => {
-      toast.success("Cita eliminada");
-      refetchAppointments();
+      toast.success("Motivo eliminado");
+      refetchReasons();
     },
   });
 
   const createReason = trpc.scheduling.createReason.useMutation({
     onSuccess: () => {
       toast.success("Motivo creado");
-      refetchReasons();
-      setNewReason("");
-      setNewReasonColor("#3b82f6");
-    },
-  });
-
-  const deleteReason = trpc.scheduling.deleteReason.useMutation({
-    onSuccess: () => {
-      toast.success("Motivo eliminado");
       refetchReasons();
     },
   });
@@ -98,16 +91,20 @@ export default function Scheduling() {
     setNotes("");
   };
 
-  // Calendar logic
+  const handleLeadSelect = (lead: any) => {
+    setFirstName(lead.name.split(" ")[0] || "");
+    setLastName(lead.name.split(" ").slice(1).join(" ") || "");
+    setPhone(lead.phone || "");
+    setEmail(lead.email || "");
+  };
+
+  // Calendar Logic
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
   const daysInMonth = eachDayOfInterval({ start: monthStart, end: monthEnd });
-
-  // Get first day of week offset
   const firstDayOfWeek = monthStart.getDay();
   const emptyDays = Array(firstDayOfWeek).fill(null);
 
-  // Group appointments by date
   const appointmentsByDate = useMemo(() => {
     const grouped: Record<string, typeof appointments> = {};
     appointments.forEach((apt) => {
@@ -124,19 +121,19 @@ export default function Scheduling() {
   const maxPerSlot = schedRules?.maxPerSlot ?? 6;
   const slotMinutes = schedRules?.slotMinutes ?? 15;
   const allowCustomTime = schedRules?.allowCustomTime ?? true;
+
   const selectedSlotCount = appointmentTime
     ? selectedDateAppointments.filter((a) => a.appointmentTime === appointmentTime).length
     : 0;
   const slotIsFull = selectedSlotCount >= maxPerSlot;
 
   const handleCreateAppointment = () => {
-    if (!selectedDate || !firstName || !lastName || !phone || !appointmentTime) {
-      toast.error("Por favor complete los campos requeridos");
+    if (!selectedDate || !firstName || !phone || !appointmentTime) {
+      toast.error("Complete los campos obligatorios");
       return;
     }
-
     if (slotIsFull) {
-      toast.error(`Ese horario ya está completo (${maxPerSlot}/${maxPerSlot}). Probá otro horario`);
+      toast.error("Horario lleno");
       return;
     }
 
@@ -152,157 +149,89 @@ export default function Scheduling() {
     });
   };
 
-  const handleCreateReason = () => {
-    if (!newReason.trim()) return;
-    createReason.mutate({ name: newReason, color: newReasonColor });
-  };
-
-  const getReasonById = (id: number | null) => {
-    if (!id) return null;
-    return reasons.find((r) => r.id === id);
-  };
-
-  // Day view grid rows (by hour)
-  const hours = Array.from({ length: 13 }, (_, i) => i + 8); // 08:00 -> 20:00
-
-  const reasonColors = [
-    "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6",
-    "#ec4899", "#06b6d4", "#84cc16", "#f97316", "#6366f1"
-  ];
-
   return (
     <DashboardLayout>
-      <div className="p-6">
-        <div className="flex items-center justify-between mb-6">
+      <div className="p-6 space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Agendamiento</h1>
-            <p className="text-muted-foreground">Gestiona tus citas y reuniones</p>
+            <p className="text-muted-foreground">Gestiona tus citas y recordatorios</p>
           </div>
           <div className="flex gap-2">
-            <Dialog open={isReasonsDialogOpen} onOpenChange={setIsReasonsDialogOpen}>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <Settings className="w-4 h-4 mr-2" />
-                  Motivos
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Gestionar Motivos de Cita</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Nuevo motivo..."
-                      value={newReason}
-                      onChange={(e) => setNewReason(e.target.value)}
-                    />
-                    <Select value={newReasonColor} onValueChange={setNewReasonColor}>
-                      <SelectTrigger className="w-20">
-                        <div
-                          className="w-4 h-4 rounded-full"
-                          style={{ backgroundColor: newReasonColor }}
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {reasonColors.map((color) => (
-                          <SelectItem key={color} value={color}>
-                            <div className="flex items-center gap-2">
-                              <div
-                                className="w-4 h-4 rounded-full"
-                                style={{ backgroundColor: color }}
-                              />
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button onClick={handleCreateReason} size="sm">
-                      <Plus className="w-4 h-4" />
-                    </Button>
-                  </div>
-                  <ScrollArea className="h-[200px]">
-                    <div className="space-y-2">
-                      {reasons.map((reason) => (
-                        <div
-                          key={reason.id}
-                          className="flex items-center justify-between p-2 rounded-lg bg-muted/50"
-                        >
-                          <div className="flex items-center gap-2">
-                            <div
-                              className="w-3 h-3 rounded-full"
-                              style={{ backgroundColor: reason.color || "#3b82f6" }}
-                            />
-                            <span>{reason.name}</span>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => deleteReason.mutate({ id: reason.id })}
-                          >
-                            <Trash2 className="w-4 h-4 text-destructive" />
-                          </Button>
-                        </div>
-                      ))}
-                      {reasons.length === 0 && (
-                        <p className="text-center text-muted-foreground py-4">
-                          No hay motivos configurados
-                        </p>
-                      )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              </DialogContent>
-            </Dialog>
+            <Button variant="outline" size="sm" onClick={() => setIsConfigOpen(true)}>
+              <Settings className="w-4 h-4 mr-2" />
+              Configurar
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setIsTemplatesOpen(true)}>
+              <MessageSquare className="w-4 h-4 mr-2" />
+              Plantillas
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setIsReasonsDialogOpen(true)}>
+              <div className="w-4 h-4 mr-2 rounded-full border border-current" />
+              Motivos
+            </Button>
           </div>
         </div>
 
+        <Dialog open={isConfigOpen} onOpenChange={setIsConfigOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Configuración de Agenda</DialogTitle>
+            </DialogHeader>
+            <SchedulingConfigForm
+              initialData={schedRules}
+              onSave={() => {
+                refetchRules();
+                setIsConfigOpen(false);
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={isTemplatesOpen} onOpenChange={setIsTemplatesOpen}>
+          <DialogContent className="max-w-3xl">
+            <DialogHeader>
+              <DialogTitle>Plantillas de Recordatorio</DialogTitle>
+              <DialogDescription>Mensajes automáticos enviados por WhatsApp</DialogDescription>
+            </DialogHeader>
+            <ReminderTemplatesManager />
+          </DialogContent>
+        </Dialog>
+
+        <ReasonsManager
+          isOpen={isReasonsDialogOpen}
+          onClose={() => setIsReasonsDialogOpen(false)}
+          reasons={reasons}
+          onCreate={createReason.mutate}
+          onDelete={deleteReason.mutate}
+        />
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Calendar */}
-          <Card className="lg:col-span-2 bg-card border-border">
+          <Card className="lg:col-span-2">
             <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="w-5 h-5" />
+              <CardTitle className="capitalize">
                 {format(currentMonth, "MMMM yyyy", { locale: es })}
               </CardTitle>
               <div className="flex gap-1">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
-                >
+                <Button variant="outline" size="icon" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
                   <ChevronLeft className="w-4 h-4" />
                 </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
-                >
+                <Button variant="outline" size="icon" onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}>
                   <ChevronRight className="w-4 h-4" />
                 </Button>
               </div>
             </CardHeader>
             <CardContent>
-              {/* Days header */}
-              <div className="grid grid-cols-7 gap-1 mb-2">
-                {["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"].map((day) => (
-                  <div
-                    key={day}
-                    className="text-center text-sm font-medium text-muted-foreground py-2"
-                  >
-                    {day}
-                  </div>
+              <div className="grid grid-cols-7 gap-1 text-center mb-2">
+                {["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"].map(d => (
+                  <div key={d} className="text-sm font-medium text-muted-foreground py-2">{d}</div>
                 ))}
               </div>
-
-              {/* Calendar grid */}
               <div className="grid grid-cols-7 gap-1">
-                {emptyDays.map((_, i) => (
-                  <div key={`empty-${i}`} className="h-24" />
-                ))}
-                {daysInMonth.map((day) => {
+                {emptyDays.map((_, i) => <div key={`empty-${i}`} className="h-24" />)}
+                {daysInMonth.map(day => {
                   const dateKey = format(day, "yyyy-MM-dd");
-                  const dayAppointments = appointmentsByDate[dateKey] || [];
+                  const dayApts = appointmentsByDate[dateKey] || [];
                   const isSelected = selectedDate && isSameDay(day, selectedDate);
                   const isToday = isSameDay(day, new Date());
 
@@ -311,45 +240,37 @@ export default function Scheduling() {
                       key={dateKey}
                       onClick={() => {
                         setSelectedDate(day);
-                        setIsNewAppointmentOpen(true); // Direct open
+                        setIsNewAppointmentOpen(true);
                         resetForm();
                         if (!appointmentTime) setAppointmentTime("09:00");
                       }}
-                      className={`
-                        h-24 p-1 rounded-lg cursor-pointer transition-all border
-                        ${isSelected
-                          ? "bg-primary/20 border-primary"
-                          : "bg-muted/30 border-transparent hover:bg-muted/50"
-                        }
-                        ${isToday ? "ring-2 ring-primary ring-offset-2 ring-offset-background" : ""}
-                      `}
+                      className={cn(
+                        "h-24 p-1 rounded-lg cursor-pointer transition-all border relative",
+                        isSelected ? "bg-primary/10 border-primary" : "bg-card hover:bg-accent/50 border-transparent",
+                        isToday && "ring-2 ring-primary ring-inset"
+                      )}
                     >
-                      <div className={`
-                        text-sm font-medium mb-1
-                        ${isToday ? "text-primary" : "text-foreground"}
-                      `}>
+                      <div className={cn("text-xs font-medium mb-1", isToday ? "text-primary" : "")}>
                         {format(day, "d")}
                       </div>
-                      <div className="space-y-0.5 overflow-hidden">
-                        {dayAppointments.slice(0, 2).map((apt) => {
-                          const reason = getReasonById(apt.reasonId);
+                      <div className="space-y-1 overflow-hidden h-[calc(100%-20px)]">
+                        {dayApts.slice(0, 3).map(apt => {
+                          const reason = reasons.find(r => r.id === apt.reasonId);
                           return (
                             <div
                               key={apt.id}
-                              className="text-xs truncate px-1 py-0.5 rounded"
+                              className="text-[10px] truncate px-1 rounded"
                               style={{
-                                backgroundColor: reason?.color ? `${reason.color}30` : "#3b82f630",
+                                backgroundColor: reason?.color ? `${reason.color}20` : "#3b82f620",
                                 color: reason?.color || "#3b82f6"
                               }}
                             >
                               {apt.appointmentTime} {apt.firstName}
                             </div>
-                          );
+                          )
                         })}
-                        {dayAppointments.length > 2 && (
-                          <div className="text-xs text-muted-foreground px-1">
-                            +{dayAppointments.length - 2} más
-                          </div>
+                        {dayApts.length > 3 && (
+                          <div className="text-[10px] text-muted-foreground pl-1">+{dayApts.length - 3} más</div>
                         )}
                       </div>
                     </div>
@@ -359,144 +280,327 @@ export default function Scheduling() {
             </CardContent>
           </Card>
 
-          {/* Selected day Detail View (Side Panel) */}
-          <Card className="bg-card border-border h-fit">
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle className="text-lg">
-                {selectedDate
-                  ? format(selectedDate, "EEEE d 'de' MMMM", { locale: es })
-                  : "Selecciona un día"
-                }
+          <Card className="h-fit">
+            <CardHeader>
+              <CardTitle>
+                {selectedDate ? format(selectedDate, "EEEE d 'de' MMMM", { locale: es }) : "Detalles"}
               </CardTitle>
-              {selectedDate && (
-                <Dialog open={isNewAppointmentOpen} onOpenChange={setIsNewAppointmentOpen}>
-                  <DialogTrigger asChild>
-                    <Button size="sm">
-                      <Plus className="w-4 h-4 mr-1" />
-                      Nueva Cita
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>Agendar Nueva Cita</DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                      {/* Form Content */}
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label htmlFor="firstName">Nombre *</Label>
-                          <Input
-                            id="firstName"
-                            value={firstName}
-                            onChange={(e) => setFirstName(e.target.value)}
-                            placeholder="Juan"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="lastName">Apellido *</Label>
-                          <Input
-                            id="lastName"
-                            value={lastName}
-                            onChange={(e) => setLastName(e.target.value)}
-                            placeholder="Pérez"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="phone">Teléfono *</Label>
-                        <Input
-                          id="phone"
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          placeholder="+507 6999-8888"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="email">Email (opcional)</Label>
-                        <Input
-                          id="email"
-                          type="email"
-                          value={email}
-                          onChange={(e) => setEmail(e.target.value)}
-                          placeholder="correo@ejemplo.com"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="reason">Motivo</Label>
-                        <Select value={reasonId} onValueChange={setReasonId}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Selecciona un motivo" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {reasons.map((reason) => (
-                              <SelectItem key={reason.id} value={reason.id.toString()}>
-                                <div className="flex items-center gap-2">
-                                  <div
-                                    className="w-3 h-3 rounded-full"
-                                    style={{ backgroundColor: reason.color || "#3b82f6" }}
-                                  />
-                                  {reason.name}
-                                </div>
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="time">Hora *</Label>
-                        <Input
-                          id="time"
-                          type="time"
-                          step={allowCustomTime ? 60 : slotMinutes * 60}
-                          value={appointmentTime}
-                          onChange={(e) => setAppointmentTime(e.target.value)}
-                          placeholder="HH:MM"
-                        />
-                        <p className={
-                          slotIsFull ? "text-xs text-destructive" : "text-xs text-muted-foreground"
-                        }>
-                          Cupo para este horario: {selectedSlotCount}/{maxPerSlot}
-                        </p>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label htmlFor="notes">Notas</Label>
-                        <Textarea
-                          id="notes"
-                          value={notes}
-                          onChange={(e) => setNotes(e.target.value)}
-                          placeholder="Notas adicionales..."
-                          rows={3}
-                        />
-                      </div>
-
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="outline"
-                          onClick={() => setIsNewAppointmentOpen(false)}
-                        >
-                          Cancelar
-                        </Button>
-                        <Button
-                          onClick={handleCreateAppointment}
-                          disabled={createAppointment.isPending || slotIsFull}
-                        >
-                          {createAppointment.isPending ? "Guardando..." : "Agendar"}
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              )}
             </CardHeader>
+            <CardContent>
+              {!selectedDate ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  Selecciona un día para ver o crear citas
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <Button className="w-full" onClick={() => setIsNewAppointmentOpen(true)}>
+                    <Plus className="w-4 h-4 mr-2" /> Nueva Cita
+                  </Button>
+
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {selectedDateAppointments.length === 0 && (
+                      <p className="text-sm text-center text-muted-foreground py-4">No hay citas para este día</p>
+                    )}
+                    {selectedDateAppointments.map(apt => {
+                      const reason = reasons.find(r => r.id === apt.reasonId);
+                      return (
+                        <div key={apt.id} className="flex flex-col gap-1 p-3 rounded-lg border bg-card">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Clock className="w-3 h-3 text-muted-foreground" />
+                              <span className="font-medium text-sm">{apt.appointmentTime}</span>
+                            </div>
+                            {reason && (
+                              <div
+                                className="w-2 h-2 rounded-full"
+                                style={{ backgroundColor: reason.color }}
+                              />
+                            )}
+                          </div>
+                          <div className="font-medium">{apt.firstName} {apt.lastName}</div>
+                          <div className="text-xs text-muted-foreground">{apt.phone}</div>
+                          {apt.notes && <div className="text-xs text-muted-foreground mt-1 italic">"{apt.notes}"</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </CardContent>
           </Card>
         </div>
+
+        <Dialog open={isNewAppointmentOpen} onOpenChange={setIsNewAppointmentOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Nueva Cita</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label>Buscar Contacto (Opcional)</Label>
+                <LeadSearchCombobox onSelect={handleLeadSelect} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Nombre</Label>
+                  <Input value={firstName} onChange={e => setFirstName(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Apellido</Label>
+                  <Input value={lastName} onChange={e => setLastName(e.target.value)} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Teléfono</Label>
+                <Input value={phone} onChange={e => setPhone(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Motivo</Label>
+                <Select value={reasonId} onValueChange={setReasonId}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar..." /></SelectTrigger>
+                  <SelectContent>
+                    {reasons.map(r => (
+                      <SelectItem key={r.id} value={r.id.toString()}>
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: r.color }} />
+                          {r.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Hora</Label>
+                <Input
+                  type="time"
+                  value={appointmentTime}
+                  onChange={e => setAppointmentTime(e.target.value)}
+                  step={allowCustomTime ? 60 : slotMinutes * 60}
+                />
+                {slotIsFull && <p className="text-xs text-red-500">Horario lleno ({selectedSlotCount}/{maxPerSlot})</p>}
+              </div>
+              <div className="space-y-2">
+                <Label>Notas</Label>
+                <Textarea value={notes} onChange={e => setNotes(e.target.value)} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={handleCreateAppointment} disabled={createAppointment.isPending}>
+                {createAppointment.isPending ? "Agendando..." : "Agendar Cita"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
-    </DashboardLayout >
+    </DashboardLayout>
   );
 }
 
+// --- Subcomponents ---
+
+function LeadSearchCombobox({ onSelect }: { onSelect: (lead: any) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const { data: leads = [], isLoading } = trpc.leads.search.useQuery(
+    { query: debouncedQuery, limit: 5 },
+    { enabled: debouncedQuery.length > 1 }
+  );
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between">
+          <span className="truncate">{query || "Buscar..."}</span>
+          <Search className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[300px] p-0">
+        <Command shouldFilter={false}>
+          <CommandInput placeholder="Buscar nombre o teléfono..." value={query} onValueChange={setQuery} />
+          <CommandList>
+            {isLoading && <CommandEmpty>Buscando...</CommandEmpty>}
+            {leads.length === 0 && !isLoading && <CommandEmpty>No encontrado.</CommandEmpty>}
+            <CommandGroup>
+              {leads.map((lead) => (
+                <CommandItem
+                  key={lead.id}
+                  onSelect={() => {
+                    onSelect(lead);
+                    setOpen(false);
+                  }}
+                >
+                  <div className="flex flex-col">
+                    <span>{lead.name}</span>
+                    <span className="text-xs text-muted-foreground">{lead.phone}</span>
+                  </div>
+                  <Check className={cn("ml-auto h-4 w-4", "opacity-0")} />
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function SchedulingConfigForm({ initialData, onSave }: { initialData: any, onSave: () => void }) {
+  const [form, setForm] = useState({
+    slotMinutes: 15,
+    maxPerSlot: 1,
+    allowCustomTime: true
+  });
+
+  useEffect(() => {
+    if (initialData) {
+      setForm({
+        slotMinutes: initialData.slotMinutes ?? 15,
+        maxPerSlot: initialData.maxPerSlot ?? 1,
+        allowCustomTime: initialData.allowCustomTime ?? true
+      });
+    }
+  }, [initialData]);
+
+  const updateGeneral = trpc.settings.updateGeneral.useMutation({
+    onSuccess: () => {
+      toast.success("Configuración guardada");
+      onSave();
+    }
+  });
+
+  const handleSave = () => {
+    // We only update scheduling part, assuming other parts are optional in updateGeneral
+    updateGeneral.mutate({ scheduling: form });
+  };
+
+  return (
+    <div className="space-y-4 py-4">
+      <div className="grid gap-2">
+        <Label>Duración del Slot (min)</Label>
+        <Input type="number" value={form.slotMinutes} onChange={e => setForm(p => ({ ...p, slotMinutes: Number(e.target.value) }))} />
+      </div>
+      <div className="grid gap-2">
+        <Label>Citas simultáneas (Max per Slot)</Label>
+        <Input type="number" value={form.maxPerSlot} onChange={e => setForm(p => ({ ...p, maxPerSlot: Number(e.target.value) }))} />
+      </div>
+      <div className="flex items-center gap-2">
+        <Switch checked={form.allowCustomTime} onCheckedChange={c => setForm(p => ({ ...p, allowCustomTime: c }))} />
+        <Label>Permitir hora manual</Label>
+      </div>
+      <Button className="w-full" onClick={handleSave} disabled={updateGeneral.isPending}>
+        {updateGeneral.isPending ? "Guardando..." : "Guardar Cambios"}
+      </Button>
+    </div>
+  )
+}
+
+function ReminderTemplatesManager() {
+  const { data: templates = [], refetch } = trpc.scheduling.getTemplates.useQuery();
+  const saveMutation = trpc.scheduling.saveTemplate.useMutation({ onSuccess: () => { toast.success("Guardado"); refetch(); setEditing(null); } });
+  const deleteMutation = trpc.scheduling.deleteTemplate.useMutation({ onSuccess: () => { toast.success("Eliminado"); refetch(); } });
+
+  const [editing, setEditing] = useState<any>(null); // null = list, {} = new, {id...} = edit
+
+  if (editing) {
+    return (
+      <div className="space-y-4">
+        <div className="grid gap-2">
+          <Label>Nombre</Label>
+          <Input value={editing.name || ""} onChange={e => setEditing({ ...editing, name: e.target.value })} placeholder="Ej: Recordatorio 24h" />
+        </div>
+        <div className="grid gap-2">
+          <Label>Mensaje</Label>
+          <Textarea
+            value={editing.content || ""}
+            onChange={e => setEditing({ ...editing, content: e.target.value })}
+            placeholder="Hola {{name}}, recordá tu cita..."
+            rows={4}
+          />
+          <p className="text-xs text-muted-foreground">Variables: {"{{name}}"}, {"{{date}}"}, {"{{time}}"}</p>
+        </div>
+        <div className="grid gap-2">
+          <Label>Días antes</Label>
+          <Input type="number" value={editing.daysBefore ?? 1} onChange={e => setEditing({ ...editing, daysBefore: Number(e.target.value) })} />
+        </div>
+        <div className="flex gap-2 justify-end">
+          <Button variant="ghost" onClick={() => setEditing(null)}>Cancelar</Button>
+          <Button onClick={() => saveMutation.mutate(editing as any)} disabled={saveMutation.isPending}>Guardar</Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <p className="text-sm text-muted-foreground">{templates.length} plantillas configuradas</p>
+        <Button size="sm" onClick={() => setEditing({ name: "", content: "", daysBefore: 1 })}>
+          <Plus className="w-4 h-4 mr-2" /> Nueva
+        </Button>
+      </div>
+      <ScrollArea className="h-[300px] border rounded-md p-2">
+        <div className="space-y-2">
+          {templates.map(t => (
+            <div key={t.id} className="flex items-center justify-between p-3 border rounded-lg bg-card">
+              <div>
+                <div className="font-medium">{t.name}</div>
+                <div className="text-xs text-muted-foreground truncate max-w-[300px]">{t.content}</div>
+                <div className="text-xs bg-muted inline-block px-1 rounded mt-1">{t.daysBefore} días antes</div>
+              </div>
+              <div className="flex gap-1">
+                <Button variant="ghost" size="icon" onClick={() => setEditing(t)}><Settings className="w-4 h-4" /></Button>
+                <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate({ id: t.id })}><Trash2 className="w-4 h-4 text-destructive" /></Button>
+              </div>
+            </div>
+          ))}
+          {templates.length === 0 && <div className="text-center py-8 text-muted-foreground">No hay plantillas</div>}
+        </div>
+      </ScrollArea>
+    </div>
+  )
+}
+
+function ReasonsManager({ isOpen, onClose, reasons, onCreate, onDelete }: any) {
+  const [name, setName] = useState("");
+  const [color, setColor] = useState("#3b82f6");
+
+  const colors = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Gestionar Motivos</DialogTitle></DialogHeader>
+        <div className="flex gap-2 mb-4">
+          <Input value={name} onChange={e => setName(e.target.value)} placeholder="Nuevo motivo..." />
+          <Select value={color} onValueChange={setColor}>
+            <SelectTrigger className="w-16"><div className="w-4 h-4 rounded-full" style={{ backgroundColor: color }} /></SelectTrigger>
+            <SelectContent>
+              {colors.map(c => <SelectItem key={c} value={c}><div className="w-4 h-4 rounded-full" style={{ backgroundColor: c }} /></SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Button onClick={() => { onCreate({ name, color }); setName(""); }}><Plus className="w-4 h-4" /></Button>
+        </div>
+        <div className="space-y-2 max-h-[300px] overflow-y-auto">
+          {reasons.map((r: any) => (
+            <div key={r.id} className="flex justify-between items-center p-2 border rounded">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: r.color }} />
+                <span>{r.name}</span>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => onDelete({ id: r.id })}><Trash2 className="w-4 h-4 text-destructive" /></Button>
+            </div>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}

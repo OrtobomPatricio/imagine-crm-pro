@@ -45,12 +45,32 @@ export const appSettings = mysqlTable("app_settings", {
     allowCustomTime: boolean;
   }>(),
 
+  // Dashboard configuration (quick actions visibility)
+  dashboardConfig: json("dashboardConfig").$type<Record<string, boolean>>(),
+
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
 export type AppSettings = typeof appSettings.$inferSelect;
 export type InsertAppSettings = typeof appSettings.$inferInsert;
+
+/**
+ * Reminder templates for appointments
+ */
+export const reminderTemplates = mysqlTable("reminder_templates", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  content: text("content").notNull(),
+  // e.g. "Hola {{name}}, recordá tu cita mañana a las {{time}}"
+  daysBefore: int("daysBefore").default(1).notNull(), // 0 = same day, 1 = 1 day before
+  isActive: boolean("isActive").default(true).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type ReminderTemplate = typeof reminderTemplates.$inferSelect;
+export type InsertReminderTemplate = typeof reminderTemplates.$inferInsert;
 
 /**
  * WhatsApp numbers for campaigns

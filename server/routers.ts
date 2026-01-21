@@ -4,7 +4,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, protectedProcedure, router, adminProcedure, permissionProcedure } from "./_core/trpc";
 import { z } from "zod";
 import { getDb } from "./db";
-import { leads, whatsappNumbers, campaigns, campaignRecipients, messages, activityLogs, users, integrations, appointments, appointmentReasons, conversations, chatMessages, whatsappConnections, appSettings, workflows } from "../drizzle/schema";
+import { leads, whatsappNumbers, campaigns, campaignRecipients, messages, activityLogs, users, integrations, appointments, appointmentReasons, conversations, chatMessages, whatsappConnections, appSettings, workflows, reminderTemplates } from "../drizzle/schema";
 import { assertSafeOutboundUrl } from "./_core/urlSafety";
 import { encryptSecret, decryptSecret, maskSecret } from "./_core/crypto";
 import { sendCloudMessage } from "./whatsapp/cloud";
@@ -170,55 +170,91 @@ export const appRouter = router({
     updatePermissionsMatrix: adminProcedure
       .input(z.object({ permissionsMatrix: z.record(z.string(), z.array(z.string())) }))
       .mutation(async ({ input, ctx }) => {
-        // Only owner can touch permissions
         if ((ctx.user as any).role !== "owner") {
           throw new Error("Only owner can change permissions");
         }
-
         const db = await getDb();
         if (!db) throw new Error("Database not available");
 
         const existing = await db.select().from(appSettings).limit(1);
         if (existing.length === 0) {
-          await db.insert(appSettings).values({
-            companyName: "Imagine Lab CRM",
-            timezone: "America/Asuncion",
-            language: "es",
-            currency: "PYG",
-            permissionsMatrix: input.permissionsMatrix as any,
-            scheduling: { slotMinutes: 15, maxPerSlot: 6, allowCustomTime: true },
-          });
+          await db.insert(appSettings).values({ permissionsMatrix: input.permissionsMatrix as any });
         } else {
           await db.update(appSettings).set({ permissionsMatrix: input.permissionsMatrix as any });
         }
-
         return { success: true } as const;
       }),
 
-    // Anyone logged in can read scheduling rules (used by Agendamiento UI)
+    updateDashboardConfig: adminProcedure
+      .input(z.record(z.string(), z.boolean()))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+        const existing = await db.select().from(appSettings).limit(1);
+        if (existing.length === 0) {
+          await db.insert(appSettings).values({ dashboardConfig: input });
+        } else {
+          await db.update(appSettings).set({ dashboardConfig: input });
+        }
+        return { success: true };
+      }),
+
     getScheduling: protectedProcedure.query(async () => {
       const db = await getDb();
-      if (!db) {
-        return { slotMinutes: 15, maxPerSlot: 6, allowCustomTime: true };
-      }
+      if (!db) return { slotMinutes: 15, maxPerSlot: 6, allowCustomTime: true };
       const rows = await db.select().from(appSettings).limit(1);
-      const scheduling =
-        (rows[0] as any)?.scheduling ?? { slotMinutes: 15, maxPerSlot: 6, allowCustomTime: true };
-      return scheduling;
+      return (rows[0] as any)?.scheduling ?? { slotMinutes: 15, maxPerSlot: 6, allowCustomTime: true };
     }),
 
     myPermissions: protectedProcedure.query(async ({ ctx }) => {
       const db = await getDb();
-      if (!db || !ctx.user) {
-        return { role: ctx.user?.role ?? "agent", permissions: [] };
-      }
-
+      if (!db || !ctx.user) return { role: ctx.user?.role ?? "agent", permissions: [] };
       const rows = await db.select().from(appSettings).limit(1);
       const matrix = (rows[0] as any)?.permissionsMatrix ?? {};
       const role = (ctx.user as any).role ?? "agent";
-      const permissions = role === "owner" ? ["*"] : (matrix[role] ?? []);
-      return { role, permissions };
+      return { role, permissions: role === "owner" ? ["*"] : (matrix[role] ?? []) };
     }),
+  }),
+
+  // Scheduling Router (New)
+  scheduling: router({
+    getTemplates: protectedProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(reminderTemplates).where(eq(reminderTemplates.isActive, true));
+    }),
+
+    saveTemplate: permissionProcedure("scheduling.manage")
+      .input(z.object({
+        id: z.number().optional(),
+        name: z.string().min(1),
+        content: z.string().min(1),
+        daysBefore: z.number().min(0),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB error");
+        if (input.id) {
+          await db.update(reminderTemplates).set({
+            name: input.name, content: input.content, daysBefore: input.daysBefore
+          }).where(eq(reminderTemplates.id, input.id));
+          return { success: true, id: input.id };
+        } else {
+          const res = await db.insert(reminderTemplates).values({
+            name: input.name, content: input.content, daysBefore: input.daysBefore, isActive: true
+          });
+          return { success: true, id: res[0].insertId };
+        }
+      }),
+
+    deleteTemplate: permissionProcedure("scheduling.manage")
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB error");
+        await db.delete(reminderTemplates).where(eq(reminderTemplates.id, input.id));
+        return { success: true };
+      }),
   }),
 
   // Team management (only admin/owner)
@@ -396,6 +432,27 @@ export const appRouter = router({
 
   // Leads router
   leads: router({
+    search: protectedProcedure
+      .input(z.object({
+        query: z.string().min(1),
+        limit: z.number().default(10)
+      }))
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return [];
+
+        const term = `%${input.query}%`;
+        return db.select({
+          id: leads.id,
+          name: leads.name,
+          phone: leads.phone,
+          email: leads.email
+        })
+          .from(leads)
+          .where(sql`(${leads.name} LIKE ${term} OR ${leads.phone} LIKE ${term})`)
+          .limit(input.limit);
+      }),
+
     list: permissionProcedure("leads.view")
       .input(z.object({
         status: z.enum(['new', 'contacted', 'qualified', 'negotiation', 'won', 'lost']).optional(),

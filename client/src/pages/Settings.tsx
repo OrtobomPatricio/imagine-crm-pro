@@ -227,7 +227,7 @@ function SettingsContent() {
         <TabsList className="grid w-full grid-cols-3 md:grid-cols-5">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="team">Usuarios</TabsTrigger>
-          <TabsTrigger value="schedule">Agendamiento</TabsTrigger>
+          <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="connections">Conexiones API</TabsTrigger>
           <TabsTrigger value="facebook">Facebook</TabsTrigger>
           <TabsTrigger value="perms" disabled={role !== "owner"}>Permisos</TabsTrigger>
@@ -328,59 +328,8 @@ function SettingsContent() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="schedule" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Reglas de agenda</CardTitle>
-              <CardDescription>
-                Slots y capacidad por horario (pro)
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="grid gap-2">
-                  <Label>Duración de slot (min)</Label>
-                  <Input
-                    type="number"
-                    value={form.slotMinutes}
-                    onChange={(e) => setForm((p) => ({ ...p, slotMinutes: Number(e.target.value) }))}
-                    min={5}
-                    max={120}
-                  />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label>Máximo por horario</Label>
-                  <Input
-                    type="number"
-                    value={form.maxPerSlot}
-                    onChange={(e) => setForm((p) => ({ ...p, maxPerSlot: Number(e.target.value) }))}
-                    min={1}
-                    max={20}
-                  />
-                </div>
-
-                <div className="flex items-end gap-2">
-                  <Switch
-                    checked={form.allowCustomTime}
-                    onCheckedChange={(v) => setForm((p) => ({ ...p, allowCustomTime: v }))}
-                  />
-                  <div>
-                    <Label>Permitir hora manual</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Permite seleccionar cualquier hora
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex justify-end">
-                <Button onClick={saveGeneral} disabled={updateGeneral.isPending}>
-                  {updateGeneral.isPending ? "Guardando..." : "Guardar"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+        <TabsContent value="dashboard" className="space-y-4">
+          <DashboardConfigEditor />
         </TabsContent>
 
         <TabsContent value="connections" className="space-y-4">
@@ -470,6 +419,73 @@ function SettingsContent() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function DashboardConfigEditor() {
+  const query = trpc.settings.get.useQuery();
+  const utils = trpc.useContext();
+  const mutation = trpc.settings.updateDashboardConfig.useMutation({
+    onSuccess: () => {
+      toast.success("Dashboard actualizado");
+      utils.settings.get.invalidate();
+    }
+  });
+
+  const [config, setConfig] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (query.data?.dashboardConfig) {
+      setConfig(query.data.dashboardConfig as Record<string, boolean>);
+    }
+  }, [query.data]);
+
+  // Default actions list (mirrored from Dashboard.tsx - ideally shared)
+  const actions = [
+    { key: "leads", label: "Gestionar Leads" },
+    { key: "campaigns", label: "Crear Campaña" },
+    { key: "conversations", label: "Conversaciones" },
+    { key: "attendants", label: "Atendentes" },
+    { key: "health", label: "Salud de Cuentas" },
+    { key: "whatsapp", label: "Cuentas WhatsApp" },
+    { key: "integrations", label: "Integraciones" },
+    { key: "kanban", label: "Kanban Board" },
+    { key: "commissions", label: "Comisiones" },
+    { key: "goals", label: "Metas de Vendas" },
+    { key: "achievements", label: "Logros" },
+    { key: "warmup", label: "Warm-up" },
+    { key: "analytics", label: "Analytics" },
+    { key: "scheduling", label: "Agendamiento" },
+    { key: "monitoring", label: "Monitoreo en Vivo" },
+    { key: "reports", label: "Reportes" },
+  ];
+
+  const handleToggle = (key: string, val: boolean) => {
+    const next = { ...config, [key]: val };
+    setConfig(next);
+    mutation.mutate(next);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Personalizar Dashboard</CardTitle>
+        <CardDescription>Oculta o muestra las tarjetas de acceso rápido.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {actions.map(action => (
+            <div key={action.key} className="flex items-center gap-2 border p-3 rounded-lg">
+              <Switch
+                checked={config[action.key] !== false} // Default true
+                onCheckedChange={(c) => handleToggle(action.key, c)}
+              />
+              <span className="text-sm font-medium">{action.label}</span>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
