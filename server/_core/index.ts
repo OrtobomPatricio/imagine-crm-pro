@@ -11,6 +11,7 @@ import { serveStatic, setupVite } from "./vite";
 import { getDb } from "../db";
 import { sql, eq } from "drizzle-orm";
 import { users } from "../../drizzle/schema";
+import { initReminderScheduler } from "../reminderScheduler";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -251,6 +252,9 @@ async function startServer() {
 
   server.listen(port, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${port}`);
+
+    // Initialize automated reminder scheduler
+    initReminderScheduler();
   });
 }
 
