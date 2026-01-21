@@ -493,11 +493,9 @@ export default function Scheduling() {
                 </Dialog>
               )}
             </CardHeader>
-
-          </CardContent>
-        </Card>
+          </Card>
+        </div>
       </div>
-    </div>
     </DashboardLayout >
   );
 }
