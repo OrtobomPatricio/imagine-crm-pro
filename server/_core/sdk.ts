@@ -260,6 +260,7 @@ class SDKServer {
     const session = await this.verifySession(sessionCookie);
 
     if (!session) {
+      console.warn(`[Auth] Invalid session cookie. Header: ${req.headers.cookie} | Parsed: ${JSON.stringify(Object.fromEntries(cookies))}`);
       throw ForbiddenError("Invalid session cookie");
     }
 
