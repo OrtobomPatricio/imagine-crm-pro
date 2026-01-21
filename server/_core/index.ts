@@ -129,10 +129,16 @@ async function startServer() {
       if (req.headers.cookie) {
         try {
           const { sdk } = await import("./sdk");
+          const { getUserByOpenId } = await import("../db");
           const parsed = (req.headers.cookie.split(';').find(c => c.trim().startsWith('app_session_id=')) || "").split('=')[1];
           if (parsed) {
             decoded = await sdk.verifySession(parsed);
-            sessionStatus = decoded ? "valid" : "invalid_signature";
+            if (decoded) {
+              const userInDb = await getUserByOpenId(decoded.openId);
+              sessionStatus = userInDb ? "valid_and_persisted" : "valid_token_but_user_missing_in_db";
+            } else {
+              sessionStatus = "invalid_signature";
+            }
           } else {
             sessionStatus = "cookie_found_but_token_missing";
           }
