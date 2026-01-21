@@ -216,47 +216,6 @@ export const appRouter = router({
     }),
   }),
 
-  // Scheduling Router (New)
-  scheduling: router({
-    getTemplates: protectedProcedure.query(async () => {
-      const db = await getDb();
-      if (!db) return [];
-      return db.select().from(reminderTemplates).where(eq(reminderTemplates.isActive, true));
-    }),
-
-    saveTemplate: permissionProcedure("scheduling.manage")
-      .input(z.object({
-        id: z.number().optional(),
-        name: z.string().min(1),
-        content: z.string().min(1),
-        daysBefore: z.number().min(0),
-      }))
-      .mutation(async ({ input }) => {
-        const db = await getDb();
-        if (!db) throw new Error("DB error");
-        if (input.id) {
-          await db.update(reminderTemplates).set({
-            name: input.name, content: input.content, daysBefore: input.daysBefore
-          }).where(eq(reminderTemplates.id, input.id));
-          return { success: true, id: input.id };
-        } else {
-          const res = await db.insert(reminderTemplates).values({
-            name: input.name, content: input.content, daysBefore: input.daysBefore, isActive: true
-          });
-          return { success: true, id: res[0].insertId };
-        }
-      }),
-
-    deleteTemplate: permissionProcedure("scheduling.manage")
-      .input(z.object({ id: z.number() }))
-      .mutation(async ({ input }) => {
-        const db = await getDb();
-        if (!db) throw new Error("DB error");
-        await db.delete(reminderTemplates).where(eq(reminderTemplates.id, input.id));
-        return { success: true };
-      }),
-  }),
-
   // Team management (only admin/owner)
   team: router({
     listUsers: adminProcedure.query(async () => {
@@ -1132,6 +1091,45 @@ export const appRouter = router({
         await db.update(appointmentReasons)
           .set({ isActive: false })
           .where(eq(appointmentReasons.id, input.id));
+        return { success: true };
+      }),
+
+    // Reminder Templates
+    getTemplates: protectedProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(reminderTemplates).where(eq(reminderTemplates.isActive, true));
+    }),
+
+    saveTemplate: permissionProcedure("scheduling.manage")
+      .input(z.object({
+        id: z.number().optional(),
+        name: z.string().min(1),
+        content: z.string().min(1),
+        daysBefore: z.number().min(0),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB error");
+        if (input.id) {
+          await db.update(reminderTemplates).set({
+            name: input.name, content: input.content, daysBefore: input.daysBefore
+          }).where(eq(reminderTemplates.id, input.id));
+          return { success: true, id: input.id };
+        } else {
+          const res = await db.insert(reminderTemplates).values({
+            name: input.name, content: input.content, daysBefore: input.daysBefore, isActive: true
+          });
+          return { success: true, id: res[0].insertId };
+        }
+      }),
+
+    deleteTemplate: permissionProcedure("scheduling.manage")
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB error");
+        await db.delete(reminderTemplates).where(eq(reminderTemplates.id, input.id));
         return { success: true };
       }),
   }),
