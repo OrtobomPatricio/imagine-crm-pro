@@ -54,18 +54,18 @@ import { KeyboardShortcutsDialog, useKeyboardShortcuts } from "./KeyboardShortcu
 import WelcomeTour from "./WelcomeTour";
 
 const menuItems = [
-  { icon: LayoutDashboard, label: "Dashboard", path: "/" },
-  { icon: Users, label: "Leads", path: "/leads" },
-  { icon: LayoutGrid, label: "Kanban", path: "/kanban" },
-  { icon: Send, label: "Campañas", path: "/campaigns" },
-  { icon: Workflow, label: "Automatización", path: "/automations" },
-  { icon: Calendar, label: "Agendamiento", path: "/scheduling" },
-  { icon: Activity, label: "Monitoreo", path: "/monitoring" },
-  { icon: BarChart3, label: "Analytics", path: "/analytics" },
-  { icon: FileText, label: "Reportes", path: "/reports" },
-  { icon: Workflow, label: "Integraciones", path: "/integrations" },
-  { icon: Database, label: "Backups", path: "/backup" },
-  { icon: Settings, label: "Configuración", path: "/settings" },
+  { icon: LayoutDashboard, label: "Dashboard", path: "/", roles: [] },
+  { icon: Users, label: "Leads", path: "/leads", roles: [] },
+  { icon: LayoutGrid, label: "Kanban", path: "/kanban", roles: [] },
+  { icon: Send, label: "Campañas", path: "/campaigns", roles: [] },
+  { icon: Workflow, label: "Automatización", path: "/automations", roles: [] },
+  { icon: Calendar, label: "Agendamiento", path: "/scheduling", roles: [] },
+  { icon: Activity, label: "Monitoreo", path: "/monitoring", roles: [] },
+  { icon: BarChart3, label: "Analytics", path: "/analytics", roles: [] },
+  { icon: FileText, label: "Reportes", path: "/reports", roles: [] },
+  { icon: Workflow, label: "Integraciones", path: "/integrations", roles: [] },
+  { icon: Database, label: "Backups", path: "/backup", roles: ["owner", "admin"] },
+  { icon: Settings, label: "Configuración", path: "/settings", roles: [] },
 ];
 
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
@@ -256,12 +256,15 @@ function DashboardLayoutContent({
                       isActive={isActive}
                       onClick={() => setLocation(item.path)}
                       tooltip={item.label}
-                      className={`h-10 transition-all duration-200 font-normal hover:bg-primary/10 ${isActive ? 'bg-primary/15 border-l-2 border-primary' : ''}`}
+                      className={`h-10 transition-all duration-200 font-normal hover:bg-primary/10 ${isActive
+                          ? 'bg-primary/15 text-primary'
+                          : 'text-muted-foreground'
+                        }`}
                     >
                       <item.icon
-                        className={`h-4 w-4 transition-colors ${isActive ? "text-primary" : "text-muted-foreground"}`}
+                        className={`h-[18px] w-[18px] transition-colors ${isActive ? "text-primary" : ""}`}
                       />
-                      <span className={isActive ? "text-primary font-medium" : ""}>{item.label}</span>
+                      <span className={isActive ? "font-medium" : ""}>{item.label}</span>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 );
