@@ -45,9 +45,9 @@ export function getSessionCookieOptions(
     httpOnly: true,
     path: "/",
     // IMPORTANT:
-    // - sameSite=None requires Secure=true in modern browsers
-    // - for local/dev over http, use Lax so the cookie is not silently dropped
-    sameSite: secure ? "none" : "lax",
-    secure,
+    // - For debugging, we force Lax and non-secure to rule out Proxy/SSL mismatches.
+    // - This works on both HTTP and HTTPS (top-level navigation).
+    sameSite: "lax",
+    secure: false, // process.env.NODE_ENV === "production" ? secure : false
   };
 }
