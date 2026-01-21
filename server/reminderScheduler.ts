@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { getDb } from "../_core/db";
+import { getDb } from "./_core/db";
 import { appointments, reminderTemplates, whatsappNumbers, whatsappConnections } from "../drizzle/schema";
 import { and, eq, gte, lte, sql } from "drizzle-orm";
 import { sendCloudMessage } from "./whatsapp/cloud";
