@@ -105,6 +105,69 @@ async function startServer() {
     }
   });
 
+  // --- DEBUG ROUTE (TEMPORARY) ---
+  app.get("/api/public-debug", async (req, res) => {
+    try {
+      const db = await getDb();
+      let dbStatus = "unknown";
+      if (!db) {
+        dbStatus = "failed: db_null";
+      } else {
+        try {
+          await db.execute(sql`SELECT 1`);
+          dbStatus = "connected";
+        } catch (e) {
+          dbStatus = `failed: ${String(e)}`;
+        }
+      }
+
+      const cookies = req.headers.cookie || "none";
+
+      // Attempt manual verify
+      let sessionStatus = "no_cookie";
+      let decoded = null;
+      if (req.headers.cookie) {
+        try {
+          const { sdk } = await import("./sdk");
+          const parsed = (req.headers.cookie.split(';').find(c => c.trim().startsWith('app_session_id=')) || "").split('=')[1];
+          if (parsed) {
+            decoded = await sdk.verifySession(parsed);
+            sessionStatus = decoded ? "valid" : "invalid_signature";
+          } else {
+            sessionStatus = "cookie_found_but_token_missing";
+          }
+        } catch (e) {
+          sessionStatus = `error_verifying: ${String(e)}`;
+        }
+      }
+
+      res.json({
+        timestamp: new Date().toISOString(),
+        headers: {
+          host: req.headers.host,
+          x_forwarded_proto: req.headers["x-forwarded-proto"],
+          cookie_length: cookies.length,
+          cookie_raw: cookies.substring(0, 50) + "...", // truncate for safety log but visible enough
+        },
+        env: {
+          appId: process.env.VITE_APP_ID || "fallback",
+          // Show first 4 chars of secret to verify consistency without leaking
+          cookieSecretPrefix: (process.env.JWT_SECRET || "fallback").substring(0, 4) + "****",
+          oauthServer: process.env.OAUTH_SERVER_URL || "fallback",
+          ownerOpenId: process.env.OWNER_OPEN_ID || "fallback",
+        },
+        db: dbStatus,
+        session: {
+          status: sessionStatus,
+          decoded_openid: decoded?.openId || null
+        }
+      });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+  // -------------------------------
+
   // Configure body parser with larger size limit for file uploads
   // Also keep raw body for WhatsApp webhook signature verification
   app.use(
