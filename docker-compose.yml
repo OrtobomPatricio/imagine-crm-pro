@@ -19,7 +19,14 @@ services:
       retries: 20
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_OAUTH_PORTAL_URL: ${VITE_OAUTH_PORTAL_URL:-http://localhost:3000}
+        VITE_APP_ID: ${VITE_APP_ID:-imagine-crm}
+        VITE_DEV_BYPASS_AUTH: ${ALLOW_DEV_LOGIN:-0}
+        VITE_ANALYTICS_ENDPOINT: ${VITE_ANALYTICS_ENDPOINT:-}
+        VITE_ANALYTICS_WEBSITE_ID: ${VITE_ANALYTICS_WEBSITE_ID:-}
     restart: unless-stopped
     depends_on:
       mysql:
