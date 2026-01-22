@@ -43,6 +43,8 @@ services:
       WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
       WHATSAPP_GRAPH_VERSION: ${WHATSAPP_GRAPH_VERSION:-v19.0}
       WHATSAPP_GRAPH_BASE_URL: ${WHATSAPP_GRAPH_BASE_URL:-https://graph.facebook.com}
+      # Disable automatic migrations since we already pushed the schema
+      RUN_MIGRATIONS: 0
     volumes:
       - ./.env:/app/.env:ro
 
