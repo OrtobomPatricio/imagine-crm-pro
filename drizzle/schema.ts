@@ -50,6 +50,13 @@ export const appSettings = mysqlTable("app_settings", {
   // Dashboard configuration (quick actions visibility)
   dashboardConfig: json("dashboardConfig").$type<Record<string, boolean>>(),
 
+  // Sales & Commissions Configuration
+  salesConfig: json("salesConfig").$type<{
+    defaultCommissionRate: number; // e.g., 0.10 for 10%
+    currencySymbol: string; // e.g., "G$"
+    requireValueOnWon: boolean; // Force entering value when moving to "Won"
+  }>(),
+
   // SMTP Configuration (for email invitations)
   smtpConfig: json("smtpConfig").$type<{
     host: string;
@@ -209,6 +216,7 @@ export const leads = mysqlTable("leads", {
   customFields: json("customFields").$type<Record<string, any>>(), // Store dynamic values { "fieldId": value }
   source: varchar("source", { length: 100 }),
   notes: text("notes"),
+  value: decimal("value", { precision: 12, scale: 2 }).default("0.00"), // Deal value
   commission: decimal("commission", { precision: 10, scale: 2 }).default("0.00"),
   assignedToId: int("assignedToId"),
   whatsappNumberId: int("whatsappNumberId"),

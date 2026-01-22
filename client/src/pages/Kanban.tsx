@@ -26,6 +26,17 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import DashboardLayout from "@/components/DashboardLayout";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 
 // -- Tipos --
 type Lead = {
@@ -142,6 +153,25 @@ export default function KanbanBoard() {
     setActiveDragItem(lead);
   };
 
+  // -- Won Dialog State --
+  const [wonDialog, setWonDialog] = useState<{ open: boolean; leadId: number | null; stageId: number | null }>({
+    open: false,
+    leadId: null,
+    stageId: null
+  });
+  const [wonValue, setWonValue] = useState("");
+
+  const settingsQuery = trpc.settings.get.useQuery();
+  const updateLead = trpc.leads.update.useMutation({
+    onSuccess: () => {
+      refetch();
+      setWonDialog({ open: false, leadId: null, stageId: null });
+      setWonValue("");
+      toast.success("¡Venta registrada!");
+    },
+    onError: (e) => toast.error(e.message)
+  });
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveDragItem(null);
@@ -154,12 +184,31 @@ export default function KanbanBoard() {
 
     if (overStageId && activePipeline?.stages.find(s => s.id === overStageId)) {
       if (activeLead.pipelineStageId !== overStageId) {
-        updateStatus.mutate({
-          id: activeLead.id,
-          pipelineStageId: overStageId
-        });
+        // Check if target stage is WON
+        const targetStage = activePipeline.stages.find(s => s.id === overStageId);
+        const isWon = targetStage?.type === 'won';
+        const requireValue = settingsQuery.data?.salesConfig?.requireValueOnWon ?? true;
+
+        if (isWon && requireValue) {
+          setWonDialog({ open: true, leadId: activeLead.id, stageId: overStageId });
+        } else {
+          // Normal move
+          updateStatus.mutate({
+            id: activeLead.id,
+            pipelineStageId: overStageId
+          });
+        }
       }
     }
+  };
+
+  const confirmWon = () => {
+    if (!wonDialog.leadId || !wonDialog.stageId) return;
+    updateLead.mutate({
+      id: wonDialog.leadId,
+      pipelineStageId: wonDialog.stageId,
+      value: parseFloat(wonValue) || 0
+    });
   };
 
   if (isLoadingPipelines || (activePipelineId && isLoadingLeads)) {
@@ -208,6 +257,41 @@ export default function KanbanBoard() {
           </DragOverlay>
         </DndContext>
       </div>
+
+      <Dialog open={wonDialog.open} onOpenChange={(open) => !open && setWonDialog(p => ({ ...p, open: false }))}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>¡Felicidades por la Venta!</DialogTitle>
+            <DialogDescription>
+              Por favor ingresa el valor total del negocio para calcular comisiones y metas.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="value" className="text-right">
+                Valor ({settingsQuery.data?.salesConfig?.currencySymbol ?? "G$"})
+              </Label>
+              <Input
+                id="value"
+                type="number"
+                value={wonValue}
+                onChange={(e) => setWonValue(e.target.value)}
+                className="col-span-3"
+                placeholder="0.00"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setWonDialog({ open: false, leadId: null, stageId: null })} variant="outline">
+              Cancelar
+            </Button>
+            <Button onClick={confirmWon} disabled={!wonValue || updateLead.isPending}>
+              {updateLead.isPending ? "Guardando..." : "Confirmar Venta"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

@@ -40,6 +40,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { SecurityTabContent } from "@/components/SecurityTabContent";
+import { SalesConfigEditor } from "@/components/SalesConfigEditor";
 
 const TZ_OPTIONS = [
   "America/Asuncion",
@@ -264,6 +265,7 @@ function SettingsContent() {
           <TabsTrigger value="team">Usuarios</TabsTrigger>
           <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
           <TabsTrigger value="distribution">Distribución</TabsTrigger>
+          <TabsTrigger value="sales">Ventas</TabsTrigger>
           <TabsTrigger value="security">Seguridad</TabsTrigger>
           <TabsTrigger value="perms" disabled={role !== "owner"}>Permisos</TabsTrigger>
         </TabsList>
@@ -562,6 +564,14 @@ function SettingsContent() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="sales" className="space-y-4">
+          <SalesConfigEditor
+            query={settingsQuery}
+            onSave={updateGeneral.mutate}
+            isPending={updateGeneral.isPending}
+          />
         </TabsContent>
 
         <TabsContent value="security" className="space-y-4">

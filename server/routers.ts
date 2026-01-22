@@ -260,6 +260,13 @@ export const appRouter = router({
               notifySupervisor: z.boolean(),
             })
             .optional(),
+          salesConfig: z
+            .object({
+              defaultCommissionRate: z.number().min(0).max(1),
+              currencySymbol: z.string().min(1).max(5),
+              requireValueOnWon: z.boolean(),
+            })
+            .optional(),
         })
       )
       .mutation(async ({ input }) => {
@@ -278,6 +285,7 @@ export const appRouter = router({
             scheduling: input.scheduling ?? { slotMinutes: 15, maxPerSlot: 6, allowCustomTime: true },
             slaConfig: input.slaConfig,
             chatDistributionConfig: input.chatDistributionConfig,
+            salesConfig: input.salesConfig,
           });
         } else {
           await db.update(appSettings).set({
@@ -289,6 +297,7 @@ export const appRouter = router({
             ...(input.scheduling ? { scheduling: input.scheduling } : {}),
             ...(input.slaConfig ? { slaConfig: input.slaConfig } : {}),
             ...(input.chatDistributionConfig ? { chatDistributionConfig: input.chatDistributionConfig } : {}),
+            ...(input.salesConfig ? { salesConfig: input.salesConfig } : {}),
           });
         }
 
@@ -998,6 +1007,7 @@ export const appRouter = router({
         notes: z.string().optional(),
         pipelineStageId: z.number().optional(),
         customFields: z.record(z.string(), z.any()).optional(),
+        value: z.number().optional(), // Deal value
       }))
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
@@ -1008,16 +1018,12 @@ export const appRouter = router({
           ? '10000.00'
           : '5000.00';
 
-        // Use provided stage or find default first stage?
-        // We'll leave it null if not provided, and getByPipeline will migrate it or we can set it here.
-        // Better set it here if we can.
-
         const result = await db.insert(leads).values({
           ...input,
+          value: input.value ? input.value.toString() : "0.00",
           commission,
           assignedToId: ctx.user?.id,
           // If pipelineStageId is undefined, it will be null. 
-          // Ideally we fetch default pipeline first stage, but for speed let's rely on migration logic or frontend sending it.
         });
 
         return { id: result[0].insertId, success: true };
@@ -1034,6 +1040,7 @@ export const appRouter = router({
         notes: z.string().optional().nullable(),
         pipelineStageId: z.number().optional(),
         customFields: z.record(z.string(), z.any()).optional(),
+        value: z.number().optional(),
       }))
       .mutation(async ({ input }) => {
         const db = await getDb();
@@ -1045,6 +1052,10 @@ export const appRouter = router({
           (data as Record<string, unknown>).commission = data.country.toLowerCase() === 'panamá' || data.country.toLowerCase() === 'panama'
             ? '10000.00'
             : '5000.00';
+        }
+
+        if (data.value !== undefined) {
+          (data as any).value = data.value.toString();
         }
 
         await db.update(leads)
