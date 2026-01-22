@@ -28,7 +28,7 @@ async function runMigrations() {
 
     try {
         await migrate(db, {
-            migrationsFolder: path.resolve(__dirname, "../../drizzle")
+            migrationsFolder: path.resolve(process.cwd(), "drizzle")
         });
         console.log("[Migration] Success! Database is up to date.");
     } catch (error) {
