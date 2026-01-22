@@ -13,7 +13,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-change_me}"]
+      test: [ "CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-change_me}" ]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -50,8 +50,8 @@ services:
       WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET:-}
       WHATSAPP_GRAPH_VERSION: ${WHATSAPP_GRAPH_VERSION:-v19.0}
       WHATSAPP_GRAPH_BASE_URL: ${WHATSAPP_GRAPH_BASE_URL:-https://graph.facebook.com}
-      # Disable automatic migrations since we already pushed the schema
-      RUN_MIGRATIONS: 0
+      # Run migrations on start by default (safe for dev/prod)
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-1}
     volumes:
       - ./.env:/app/.env:ro
 
