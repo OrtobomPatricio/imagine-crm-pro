@@ -563,8 +563,8 @@ export const goals = mysqlTable('goals', {
   updatedAt: timestamp('updatedAt').defaultNow().onUpdateNow().notNull(),
 });
 
-export type Goal = typeof goals.;
-export type InsertGoal = typeof goals.;
+export type Goal = typeof goals.$inferSelect;
+export type InsertGoal = typeof goals.$inferInsert;
 
 /**
  * User Achievements (Badges)
