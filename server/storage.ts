@@ -1,7 +1,20 @@
-// Preconfigured storage helpers for Manus WebDev templates
-// Uses the Biz-provided storage proxy (Authorization: Bearer <token>)
-
+import fs from "fs";
+import path from "path";
 import { ENV } from './_core/env';
+
+// Determine if we should use local storage or external forge
+// For this v1, we default to local if forge keys are missing
+const USE_LOCAL = !ENV.forgeApiUrl || !ENV.forgeApiKey;
+
+const UPLOADS_DIR = path.join(process.cwd(), "uploads");
+
+// Ensure uploads dir exists
+if (USE_LOCAL) {
+  if (!fs.existsSync(UPLOADS_DIR)) {
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+    console.log("[Storage] Created local uploads directory:", UPLOADS_DIR);
+  }
+}
 
 type StorageConfig = { baseUrl: string; apiKey: string };
 
@@ -72,6 +85,36 @@ export async function storagePut(
   data: Buffer | Uint8Array | string,
   contentType = "application/octet-stream"
 ): Promise<{ key: string; url: string }> {
+
+  if (USE_LOCAL) {
+    const key = normalizeKey(relKey);
+    // Sanitize path to prevent directory traversal
+    const safeKey = path.normalize(key).replace(/^(\.\.[\/\\])+/, '');
+    const fullPath = path.join(UPLOADS_DIR, safeKey);
+
+    // Ensure parent dir exists
+    const parentDir = path.dirname(fullPath);
+    if (!fs.existsSync(parentDir)) {
+      fs.mkdirSync(parentDir, { recursive: true });
+    }
+
+    const buffer = typeof data === 'string'
+      ? Buffer.from(data, 'utf-8')
+      : Buffer.from(data);
+
+    await fs.promises.writeFile(fullPath, buffer);
+
+    // Construct public URL
+    // We assume the app is served at HOST:PORT or via domain
+    // Since we don't know the exact domain here easily without env, we make relative or best guess
+    // Ideally we use a PUBLIC_URL env var.
+    const baseUrl = process.env.VITE_OAUTH_PORTAL_URL || "http://localhost:3000";
+    const url = `${baseUrl}/uploads/${safeKey}`;
+
+    return { key: safeKey, url };
+  }
+
+  // Fallback to Forge (External)
   const { baseUrl, apiKey } = getStorageConfig();
   const key = normalizeKey(relKey);
   const uploadUrl = buildUploadUrl(baseUrl, key);
@@ -93,6 +136,21 @@ export async function storagePut(
 }
 
 export async function storageGet(relKey: string): Promise<{ key: string; url: string; }> {
+  if (USE_LOCAL) {
+    const key = normalizeKey(relKey);
+    const safeKey = path.normalize(key).replace(/^(\.\.[\/\\])+/, '');
+    // Check if file exists
+    const fullPath = path.join(UPLOADS_DIR, safeKey);
+    if (!fs.existsSync(fullPath)) {
+      throw new Error("File not found locally");
+    }
+    const baseUrl = process.env.VITE_OAUTH_PORTAL_URL || "http://localhost:3000";
+    return {
+      key: safeKey,
+      url: `${baseUrl}/uploads/${safeKey}`
+    };
+  }
+
   const { baseUrl, apiKey } = getStorageConfig();
   const key = normalizeKey(relKey);
   return {

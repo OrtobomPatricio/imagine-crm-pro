@@ -227,6 +227,9 @@ async function startServer() {
   // WhatsApp Cloud API webhook
   registerWhatsAppWebhookRoutes(app);
 
+  // Serve uploaded files locally
+  app.use("/uploads", express.static("uploads"));
+
   // tRPC API
   app.use(
     "/api/trpc",
