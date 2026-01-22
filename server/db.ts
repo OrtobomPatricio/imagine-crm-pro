@@ -10,14 +10,23 @@ let _db: ReturnType<typeof drizzle> | null = null;
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
+      console.log("[Database] Attempting to connect to:", process.env.DATABASE_URL.replace(/:[^:@]+@/, ':****@'));
       // drizzle(mysql2) expects a mysql2 Pool/Connection, not a raw string
       const pool = mysql.createPool({
         uri: process.env.DATABASE_URL,
         multipleStatements: true,
       });
+
+      // Test the connection
+      const connection = await pool.getConnection();
+      console.log("[Database] Connection successful!");
+      connection.release();
+
       _db = drizzle(pool as any);
     } catch (error) {
-      console.warn("[Database] Failed to connect:", error);
+      console.error("[Database] Failed to connect:", error);
+      console.error("[Database] Make sure MySQL is running. If using Docker: docker compose up -d mysql");
+      console.error("[Database] Check your DATABASE_URL in .env file");
       _db = null;
     }
   }

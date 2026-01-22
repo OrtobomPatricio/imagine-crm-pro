@@ -26,6 +26,9 @@ export function registerOAuthRoutes(app: Express) {
     }
 
     try {
+      console.log("[DevLogin] Starting dev login for openId:", openId);
+
+      console.log("[DevLogin] Step 1: Upserting user...");
       await db.upsertUser({
         openId,
         name: "Dev User",
@@ -33,22 +36,32 @@ export function registerOAuthRoutes(app: Express) {
         loginMethod: "dev",
         lastSignedIn: new Date(),
       });
+      console.log("[DevLogin] Step 1: User upserted successfully");
 
+      console.log("[DevLogin] Step 2: Creating session token...");
       const sessionToken = await sdk.createSessionToken(openId, {
         name: "Dev User",
         expiresInMs: ONE_YEAR_MS,
       });
+      console.log("[DevLogin] Step 2: Session token created successfully");
 
+      console.log("[DevLogin] Step 3: Setting cookie...");
       const cookieOptions = getSessionCookieOptions(req);
       res.cookie(COOKIE_NAME, sessionToken, {
         ...cookieOptions,
         maxAge: ONE_YEAR_MS,
       });
+      console.log("[DevLogin] Step 3: Cookie set successfully");
 
+      console.log("[DevLogin] Step 4: Redirecting to /");
       res.redirect(302, "/");
     } catch (error) {
-      console.error("[DevLogin] Failed", error);
-      res.status(500).json({ error: "Dev login failed" });
+      console.error("[DevLogin] Failed at some step:", error);
+      console.error("[DevLogin] Error stack:", error instanceof Error ? error.stack : "No stack trace");
+      res.status(500).json({
+        error: "Dev login failed",
+        details: error instanceof Error ? error.message : String(error)
+      });
     }
   });
 
