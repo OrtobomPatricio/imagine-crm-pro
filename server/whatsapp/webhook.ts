@@ -213,14 +213,93 @@ export function registerWhatsAppWebhookRoutes(app: Express) {
                 whatsappMessageId: waMsgId ?? null,
               },
             });
+
+            // --- AI BOT LOGIC ---
+            // If bot is enabled for this conversation, trigger a response
+            if (convo[0]?.botEnabled || (convo.length === 0 && false)) { // Default false for new convos unless config says otherwise
+              // We use a small timeout to not block the webhook response (Cloud API requirement) but node is async so it's fine.
+              // However, ideally offload to a worker. For now, we just fire and forget (void).
+              void handleBotResponse(db, whatsappNumberId, conversationId, contactPhone, content);
+            }
           }
         }
       }
 
       return res.status(200).json({ ok: true });
     } catch (e) {
-      // Never fail webhook with stack traces
+      console.error("[Webhook] Error processing incoming:", e);
       return res.status(200).json({ ok: true });
     }
   });
+}
+
+import { invokeLLM, Message } from "../_core/llm";
+import { sendCloudMessage } from "./cloud";
+
+async function handleBotResponse(db: any, whatsappNumberId: number, conversationId: number, to: string, lastUserMessage: string | null) {
+  if (!lastUserMessage) return;
+
+  try {
+    // 1. Fetch context (last 10 messages)
+    const history = await db.select()
+      .from(chatMessages)
+      .where(eq(chatMessages.conversationId, conversationId))
+      .orderBy(sql`${chatMessages.createdAt} DESC`)
+      .limit(10);
+
+    // 2. Format for LLM
+    const messages: Message[] = [
+      {
+        role: "system",
+        content: "Eres un asistente útil y amable de Imagine CRM. Tu objetivo es ayudar al usuario con sus consultas. Sé conciso y profesional. Responde en el mismo idioma que el usuario."
+      },
+      ...history.reverse().map((m: any) => ({
+        role: m.direction === "inbound" ? "user" : "assistant",
+        content: m.content || "[Media]"
+      } as Message))
+    ];
+
+    // 3. Invoke LLM
+    // Using gemini-2.5-flash as default in invokeLLM
+    console.log(`[Bot] Invoking AI for conversation ${conversationId}...`);
+    const result = await invokeLLM({
+      messages,
+      max_tokens: 300
+    });
+
+    const replyText = result.choices[0]?.message?.content;
+
+    if (typeof replyText === 'string' && replyText.trim().length > 0) {
+      // 4. Send response via WhatsApp Cloud API
+      // We need credentials for this whatsappNumberId
+      const connection = await db.select().from(whatsappConnections).where(eq(whatsappConnections.whatsappNumberId, whatsappNumberId)).limit(1);
+
+      if (connection[0]?.accessToken && connection[0]?.phoneNumberId) {
+        await sendCloudMessage({
+          accessToken: connection[0].accessToken,
+          phoneNumberId: connection[0].phoneNumberId,
+          to,
+          type: "text",
+          text: { body: replyText }
+        });
+
+        // 5. Store bot message in DB
+        await db.insert(chatMessages).values({
+          conversationId,
+          whatsappNumberId,
+          direction: "outbound",
+          messageType: "text",
+          content: replyText,
+          status: "sent",
+          sentAt: new Date(),
+        });
+        console.log(`[Bot] Replied to ${to}`);
+      } else {
+        console.warn(`[Bot] No credentials found for sending reply to ${to}`);
+      }
+    }
+
+  } catch (error) {
+    console.error(`[Bot] Failed to generate/send response`, error);
+  }
 }

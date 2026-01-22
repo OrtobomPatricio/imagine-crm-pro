@@ -434,6 +434,7 @@ export const conversations = mysqlTable("conversations", {
   lastMessageAt: timestamp("lastMessageAt"),
   unreadCount: int("unreadCount").default(0).notNull(),
   status: mysqlEnum("status", ["active", "archived", "blocked"]).default("active").notNull(),
+  botEnabled: boolean("botEnabled").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
