@@ -27,6 +27,10 @@ export default function Analytics() {
     return acc + parseFloat(lead.commission ?? '0');
   }, 0);
 
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const defaultTab = searchParams.get("tab") || "overview";
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -38,7 +42,7 @@ export default function Analytics() {
           </p>
         </div>
 
-        <Tabs defaultValue="overview" className="w-full">
+        <Tabs defaultValue={defaultTab} className="w-full">
           <TabsList className="grid w-full grid-cols-4 lg:w-[400px]">
             <TabsTrigger value="overview">General</TabsTrigger>
             <TabsTrigger value="commissions">Comisiones</TabsTrigger>

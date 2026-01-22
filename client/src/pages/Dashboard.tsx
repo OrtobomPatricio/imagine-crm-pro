@@ -129,7 +129,7 @@ const quickActions = [
     icon: DollarSign,
     label: "Comisiones",
     description: "Acompaña tus ganancias por país",
-    path: "/analytics",
+    path: "/analytics?tab=commissions",
     iconColor: "icon-container-yellow",
     hoverColor: "hover-yellow"
   },
@@ -138,7 +138,7 @@ const quickActions = [
     icon: Target,
     label: "Metas de Vendas",
     description: "Progreso y ranking del equipo",
-    path: "/analytics",
+    path: "/analytics?tab=goals",
     iconColor: "icon-container-orange",
     hoverColor: "hover-orange"
   },
@@ -147,7 +147,7 @@ const quickActions = [
     icon: Trophy,
     label: "Logros",
     description: "Badges y conquistas desbloqueadas",
-    path: "/analytics",
+    path: "/analytics?tab=achievements",
     iconColor: "icon-container-red",
     hoverColor: "hover-red"
   },
