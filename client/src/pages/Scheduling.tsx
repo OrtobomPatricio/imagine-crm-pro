@@ -433,7 +433,7 @@ export default function Scheduling() {
                     {reasons.map(r => (
                       <SelectItem key={r.id} value={r.id.toString()}>
                         <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: r.color }} />
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: r.color || "#3b82f6" }} />
                           {r.name}
                         </div>
                       </SelectItem>

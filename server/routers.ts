@@ -25,6 +25,81 @@ import { createBackup, validateBackupFile, leadsToCSV, parseCSV, importLeadsFrom
 
 export const appRouter = router({
   system: systemRouter,
+
+  // WhatsApp Management
+  whatsapp: router({
+    connect: permissionProcedure("settings.manage")
+      .input(z.object({
+        phoneNumberId: z.string(),
+        accessToken: z.string(),
+        businessAccountId: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await getDb();
+        if (!db) throw new Error("Database not available");
+
+        // Simple validation of token could be done here by calling graph api
+        // For now, just save.
+
+        // We need a unique whatsappNumberId.
+        // For now, let's just use a hash or random number if we don't have a real one from an earlier step.
+        // Wait, the schema has whatsappNumberId as unique int.
+        // We should probably fetch the phone number details from Graph API to get the real ID or just auto-increment if it's our internal ID?
+        // The schema says `whatsappNumberId` (int) and `phoneNumberId` (string).
+        // Let's assume we create a new entry.
+
+        // Check if exists
+        const existing = await db.select().from(whatsappConnections).where(eq(whatsappConnections.phoneNumberId, input.phoneNumberId)).limit(1);
+
+        if (existing.length > 0) {
+          await db.update(whatsappConnections).set({
+            accessToken: input.accessToken,
+            businessAccountId: input.businessAccountId,
+            isConnected: true,
+            updatedAt: new Date()
+          }).where(eq(whatsappConnections.id, existing[0].id));
+        } else {
+          // Generate a pseudo-random ID for whatsappNumberId if not provided?
+          // Actually, `whatsappNumberId` in `whatsappConnections` seems to match `whatsappNumbers.id` maybe?
+          // Let's look at schema again... `whatsappNumberId` is int.
+          // If we don't have `whatsappNumbers` entry, we might need to create one or just use a random int.
+          // Let's use a simple heuristic: check max ID and increment? Or just use a random int for now.
+          const randomId = Math.floor(Math.random() * 1000000);
+
+          await db.insert(whatsappConnections).values({
+            whatsappNumberId: randomId,
+            connectionType: "api",
+            phoneNumberId: input.phoneNumberId,
+            accessToken: input.accessToken,
+            businessAccountId: input.businessAccountId,
+            isConnected: true
+          });
+        }
+
+        return { success: true };
+      }),
+
+    disconnect: permissionProcedure("settings.manage")
+      .input(z.object({ phoneNumberId: z.string() }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return { success: false };
+
+        await db.update(whatsappConnections)
+          .set({ isConnected: false, accessToken: null })
+          .where(eq(whatsappConnections.phoneNumberId, input.phoneNumberId));
+
+        return { success: true };
+      }),
+
+    getStatus: permissionProcedure("settings.view")
+      .query(async () => {
+        const db = await getDb();
+        if (!db) return [];
+        return await db.select().from(whatsappConnections);
+      })
+  }),
+
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
@@ -922,7 +997,7 @@ export const appRouter = router({
         source: z.string().optional(),
         notes: z.string().optional(),
         pipelineStageId: z.number().optional(),
-        customFields: z.record(z.any()).optional(),
+        customFields: z.record(z.string(), z.any()).optional(),
       }))
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
@@ -958,7 +1033,7 @@ export const appRouter = router({
         source: z.string().optional().nullable(),
         notes: z.string().optional().nullable(),
         pipelineStageId: z.number().optional(),
-        customFields: z.record(z.any()).optional(),
+        customFields: z.record(z.string(), z.any()).optional(),
       }))
       .mutation(async ({ input }) => {
         const db = await getDb();

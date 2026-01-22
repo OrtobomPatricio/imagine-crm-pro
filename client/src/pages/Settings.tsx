@@ -195,7 +195,7 @@ function SettingsContent() {
       currency: form.currency,
       scheduling: {
         slotMinutes: form.slotMinutes,
-
+        maxPerSlot: form.maxPerSlot,
         allowCustomTime: form.allowCustomTime,
       },
       slaConfig: form.slaConfig,

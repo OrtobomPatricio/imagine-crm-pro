@@ -1,5 +1,5 @@
 
-import { db } from "../db";
+import { getDb } from "../db";
 import { appSettings, conversations, users } from "../../drizzle/schema";
 import { and, eq, lte, isNull } from "drizzle-orm";
 import { sendEmail } from "../_core/email";
@@ -9,6 +9,8 @@ import { sendEmail } from "../_core/email";
  * Should be called periodically (e.g., every 5-10 minutes) via cron.
  */
 export async function checkSLA() {
+    const db = await getDb();
+    if (!db) return;
     const settingsRows = await db.select().from(appSettings).limit(1);
     const settings = settingsRows[0];
 

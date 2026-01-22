@@ -44,7 +44,7 @@ async function sendReminder(job: ReminderJob): Promise<boolean> {
         const whatsappData = await db
             .select({
                 phoneNumberId: whatsappNumbers.id,
-                cloudPhoneNumberId: whatsappNumbers.cloudPhoneNumberId,
+                cloudPhoneNumberId: whatsappConnections.phoneNumberId, // Use connection's phone number ID
                 accessToken: whatsappConnections.accessToken,
             })
             .from(whatsappNumbers)
@@ -52,7 +52,7 @@ async function sendReminder(job: ReminderJob): Promise<boolean> {
             .where(
                 and(
                     eq(whatsappNumbers.status, "active"),
-                    eq(whatsappConnections.isActive, true)
+                    eq(whatsappConnections.isConnected, true)
                 )
             )
             .limit(1);

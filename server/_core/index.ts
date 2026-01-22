@@ -12,6 +12,7 @@ import { getDb } from "../db";
 import { sql, eq } from "drizzle-orm";
 import { users } from "../../drizzle/schema";
 import { initReminderScheduler } from "../reminderScheduler";
+import { startCampaignWorker } from "../services/campaign-worker";
 
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -87,7 +88,9 @@ async function startServer() {
 
   setInterval(() => {
     const now = Date.now();
-    for (const [k, v] of buckets) if (now > v.resetAt) buckets.delete(k);
+    Array.from(buckets.entries()).forEach(([k, v]) => {
+      if (now > v.resetAt) buckets.delete(k);
+    });
   }, 30_000).unref?.();
 
 
@@ -100,8 +103,11 @@ async function startServer() {
   app.get("/readyz", async (_req, res) => {
     try {
       const db = await getDb();
-      await db.execute(sql`SELECT 1`);
-      return res.status(200).json({ ok: true, db: true });
+      if (db) {
+        await db.execute(sql`SELECT 1`);
+        return res.status(200).json({ ok: true, db: true });
+      }
+      return res.status(503).json({ ok: false, db: false });
     } catch (_err) {
       return res.status(503).json({ ok: false, db: false });
     }
@@ -255,6 +261,7 @@ async function startServer() {
 
     // Initialize automated reminder scheduler
     initReminderScheduler();
+    startCampaignWorker();
   });
 }
 

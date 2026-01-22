@@ -13,14 +13,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
-import { 
-  Send, 
-  Paperclip, 
-  Image, 
-  Video, 
-  FileText, 
-  MapPin, 
-  Mic, 
+import {
+  Send,
+  Paperclip,
+  Image,
+  Video,
+  FileText,
+  MapPin,
+  Mic,
   Smile,
   Phone,
   Search,
@@ -45,9 +45,9 @@ const emojiCategories = {
 type Message = {
   id: number;
   conversationId: number;
-  whatsappNumberId: number;
+  whatsappNumberId: number | null;
   direction: "inbound" | "outbound";
-  messageType: "text" | "image" | "video" | "audio" | "document" | "location" | "sticker" | "contact";
+  messageType: "text" | "image" | "video" | "audio" | "document" | "location" | "sticker" | "contact" | "template";
   content: string | null;
   mediaUrl: string | null;
   mediaName: string | null;
@@ -57,7 +57,7 @@ type Message = {
 
 type Conversation = {
   id: number;
-  whatsappNumberId: number;
+  whatsappNumberId: number | null;
   contactPhone: string;
   contactName: string | null;
   unreadCount: number;
@@ -159,7 +159,7 @@ export default function Chat() {
 
   const handleSendMedia = (type: "image" | "video" | "document" | "audio") => {
     if (!selectedConversation || !selectedChannel) return;
-    
+
     // In a real implementation, this would open a file picker
     toast.info(`Función de envío de ${type} - Próximamente`);
     setIsAttachmentOpen(false);
@@ -167,7 +167,7 @@ export default function Chat() {
 
   const handleSendLocation = () => {
     if (!selectedConversation || !selectedChannel) return;
-    
+
     // In a real implementation, this would open a location picker
     toast.info("Función de envío de ubicación - Próximamente");
     setIsAttachmentOpen(false);
@@ -234,8 +234,8 @@ export default function Chat() {
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <Label>Canal</Label>
-                      <Select 
-                        value={selectedChannel?.toString() ?? ""} 
+                      <Select
+                        value={selectedChannel?.toString() ?? ""}
                         onValueChange={(v) => setSelectedChannel(parseInt(v))}
                       >
                         <SelectTrigger>
@@ -275,8 +275,8 @@ export default function Chat() {
             </div>
 
             {/* Channel selector */}
-            <Select 
-              value={selectedChannel?.toString() ?? "all"} 
+            <Select
+              value={selectedChannel?.toString() ?? "all"}
               onValueChange={(v) => setSelectedChannel(v === "all" ? null : parseInt(v))}
             >
               <SelectTrigger className="mb-3">
@@ -317,8 +317,8 @@ export default function Chat() {
                     onClick={() => setSelectedConversation(conv)}
                     className={`
                       p-3 cursor-pointer transition-colors
-                      ${selectedConversation?.id === conv.id 
-                        ? "bg-primary/10" 
+                      ${selectedConversation?.id === conv.id
+                        ? "bg-primary/10"
                         : "hover:bg-muted/50"
                       }
                     `}
@@ -422,9 +422,9 @@ export default function Chat() {
                           <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                         )}
                         {msg.messageType === "image" && msg.mediaUrl && (
-                          <img 
-                            src={msg.mediaUrl} 
-                            alt="Imagen" 
+                          <img
+                            src={msg.mediaUrl}
+                            alt="Imagen"
                             className="rounded max-w-full"
                           />
                         )}
@@ -491,32 +491,32 @@ export default function Chat() {
                     </PopoverTrigger>
                     <PopoverContent className="w-48 p-2" side="top">
                       <div className="space-y-1">
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="w-full justify-start"
                           onClick={() => handleSendMedia("image")}
                         >
                           <Image className="w-4 h-4 mr-2 text-blue-500" />
                           Imagen
                         </Button>
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="w-full justify-start"
                           onClick={() => handleSendMedia("video")}
                         >
                           <Video className="w-4 h-4 mr-2 text-purple-500" />
                           Video
                         </Button>
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="w-full justify-start"
                           onClick={() => handleSendMedia("document")}
                         >
                           <FileText className="w-4 h-4 mr-2 text-orange-500" />
                           Documento
                         </Button>
-                        <Button 
-                          variant="ghost" 
+                        <Button
+                          variant="ghost"
                           className="w-full justify-start"
                           onClick={handleSendLocation}
                         >
@@ -542,8 +542,8 @@ export default function Chat() {
                   />
 
                   {/* Voice message */}
-                  <Button 
-                    variant="ghost" 
+                  <Button
+                    variant="ghost"
                     size="icon"
                     onClick={() => toast.info("Grabación de voz - Próximamente")}
                   >
@@ -551,7 +551,7 @@ export default function Chat() {
                   </Button>
 
                   {/* Send button */}
-                  <Button 
+                  <Button
                     onClick={handleSendMessage}
                     disabled={!messageText.trim() || sendMessage.isPending}
                     className="bg-green-600 hover:bg-green-700"
