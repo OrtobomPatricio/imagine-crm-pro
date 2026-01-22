@@ -546,3 +546,36 @@ export type InsertSession = typeof sessions.$inferInsert;
  */
 
 
+
+/**
+ * User Goals for gamification and tracking
+ */
+export const goals = mysqlTable('goals', {
+  id: int('id').autoincrement().primaryKey(),
+  userId: int('userId').notNull(),
+  type: mysqlEnum('type', ['sales_amount', 'deals_closed', 'leads_created', 'messages_sent']).notNull(),
+  targetAmount: int('targetAmount').notNull(),
+  currentAmount: int('currentAmount').default(0).notNull(),
+  period: mysqlEnum('period', ['daily', 'weekly', 'monthly']).default('monthly').notNull(),
+  startDate: timestamp('startDate').notNull(),
+  endDate: timestamp('endDate').notNull(),
+  createdAt: timestamp('createdAt').defaultNow().notNull(),
+  updatedAt: timestamp('updatedAt').defaultNow().onUpdateNow().notNull(),
+});
+
+export type Goal = typeof goals.;
+export type InsertGoal = typeof goals.;
+
+/**
+ * User Achievements (Badges)
+ */
+export const achievements = mysqlTable('achievements', {
+  id: int('id').autoincrement().primaryKey(),
+  userId: int('userId').notNull(),
+  type: varchar('type', { length: 50 }).notNull(), // e.g., 'first_sale', 'shark'
+  unlockedAt: timestamp('unlockedAt').defaultNow().notNull(),
+  metadata: json('metadata'),
+});
+
+export type Achievement = typeof achievements.;
+export type InsertAchievement = typeof achievements.;

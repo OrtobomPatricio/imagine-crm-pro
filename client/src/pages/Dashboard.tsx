@@ -84,7 +84,7 @@ const quickActions = [
     icon: UserCheck,
     label: "Atendentes",
     description: "Administra tu equipo de atención",
-    path: "/leads",
+    path: "/settings?tab=team",
     iconColor: "icon-container-red",
     hoverColor: "hover-red"
   },

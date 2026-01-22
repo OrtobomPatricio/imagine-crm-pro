@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useSearch } from "wouter";
 import {
   Select,
   SelectContent,
@@ -237,6 +238,17 @@ function SettingsContent() {
     );
   }
 
+  const search = useSearch();
+  const [activeTab, setActiveTab] = useState("general");
+
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    const tab = params.get("tab");
+    if (tab && ["general", "team", "dashboard", "distribution", "security", "perms", "sla"].includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, [search]);
+
   return (
     <div className="space-y-4">
       <div>
@@ -246,7 +258,7 @@ function SettingsContent() {
         </p>
       </div>
 
-      <Tabs defaultValue="general" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-3 md:grid-cols-6">
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="team">Usuarios</TabsTrigger>
