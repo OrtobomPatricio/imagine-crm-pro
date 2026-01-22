@@ -279,8 +279,10 @@ async function handleBotResponse(db: any, whatsappNumberId: number, conversation
           accessToken: connection[0].accessToken,
           phoneNumberId: connection[0].phoneNumberId,
           to,
-          type: "text",
-          text: { body: replyText }
+          payload: {
+            type: "text",
+            body: replyText
+          }
         });
 
         // 5. Store bot message in DB
