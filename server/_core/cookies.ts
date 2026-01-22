@@ -47,7 +47,8 @@ export function getSessionCookieOptions(
     // IMPORTANT:
     // - For debugging, we force Lax and non-secure to rule out Proxy/SSL mismatches.
     // - This works on both HTTP and HTTPS (top-level navigation).
+    // Relaxed for HTTP public IP access
     sameSite: "lax",
-    secure: false, // process.env.NODE_ENV === "production" ? secure : false
+    secure: false,
   };
 }
