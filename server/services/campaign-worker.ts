@@ -59,10 +59,78 @@ async function processRunningCampaigns() {
         if (campaign.type === "whatsapp") {
             await processWhatsAppCampaignBatch(campaign);
         } else {
-            // Basic email implementation placeholder
-            // await processEmailCampaignBatch(campaign); 
-            // Mark as completed for now to avoid stuck loop if not implemented
-            await db.update(campaigns).set({ status: "completed", completedAt: new Date() }).where(eq(campaigns.id, campaign.id));
+            // Email implementation
+            await processEmailCampaignBatch(campaign);
+        }
+    }
+}
+
+async function processEmailCampaignBatch(campaign: typeof campaigns.$inferSelect) {
+    const db = await getDb();
+    if (!db) return;
+
+    // 1. Get recipients pending
+    const recipients = await db
+        .select()
+        .from(campaignRecipients)
+        .where(and(eq(campaignRecipients.campaignId, campaign.id), eq(campaignRecipients.status, "pending")))
+        .limit(BATCH_SIZE);
+
+    if (recipients.length === 0) {
+        console.log(`[CampaignWorker] Email Campaign ${campaign.id} completed.`);
+        await db
+            .update(campaigns)
+            .set({ status: "completed", completedAt: new Date() })
+            .where(eq(campaigns.id, campaign.id));
+        return;
+    }
+
+    // 2. Get Template (if any) or use raw message
+    let subject = `Campaign ${campaign.name}`;
+    let htmlContent = campaign.message || "";
+
+    if (campaign.templateId) {
+        const tmpl = await db.select().from(templates).where(eq(templates.id, campaign.templateId)).limit(1);
+        if (tmpl[0]) {
+            // If template has subject/body structure in content json, parse it.
+            // For now assuming template content is the HTML body.
+            htmlContent = tmpl[0].content;
+            subject = tmpl[0].name; // specific subject field in template table would be better
+        }
+    }
+
+    // 3. Send Emails
+    for (const recipient of recipients) {
+        try {
+            const leadRes = await db
+                .select({ email: leads.email, name: leads.name })
+                .from(leads)
+                .where(eq(leads.id, recipient.leadId))
+                .limit(1);
+
+            if (!leadRes[0] || !leadRes[0].email) {
+                await updateRecipientStatus(db, recipient.id, "failed", "Lead not found or no email");
+                continue;
+            }
+
+            const emailAddr = leadRes[0].email;
+
+            // Simple variable substitution
+            let finalHtml = htmlContent.replace(/{{name}}/g, leadRes[0].name || "Customer");
+
+            await sendEmail({
+                to: emailAddr,
+                subject: subject,
+                html: finalHtml
+            });
+
+            await updateRecipientStatus(db, recipient.id, "sent");
+            await db.execute(sql`UPDATE campaigns SET messages_sent = messages_sent + 1 WHERE id = ${campaign.id}`);
+
+        } catch (error: any) {
+            console.error(`[CampaignWorker] Failed to send email to recipient ${recipient.id}:`, error.message);
+            await updateRecipientStatus(db, recipient.id, "failed", error.message);
+            await db.execute(sql`UPDATE campaigns SET messages_failed = messages_failed + 1 WHERE id = ${campaign.id}`);
         }
     }
 }
