@@ -215,8 +215,8 @@ function DashboardLayoutContent({
   return (
     <>
       <div
-        className="sticky top-0 h-screen hidden md:block shrink-0"
-        style={{ width: `${sidebarWidth}px` }}
+        className={`sticky top-0 h-screen hidden md:block shrink-0 ${isResizing ? '' : 'transition-[width] duration-300'}`}
+        style={{ width: isCollapsed ? "3rem" : `${sidebarWidth}px` }}
         ref={sidebarRef}
       >
         <Sidebar
@@ -257,8 +257,8 @@ function DashboardLayoutContent({
                       onClick={() => setLocation(item.path)}
                       tooltip={item.label}
                       className={`h-10 transition-all duration-200 font-normal hover:bg-primary/10 ${isActive
-                          ? 'bg-primary/15 text-primary'
-                          : 'text-muted-foreground'
+                        ? 'bg-primary/15 text-primary'
+                        : 'text-muted-foreground'
                         }`}
                     >
                       <item.icon
