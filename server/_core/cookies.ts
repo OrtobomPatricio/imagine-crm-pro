@@ -44,11 +44,9 @@ export function getSessionCookieOptions(
   return {
     httpOnly: true,
     path: "/",
-    // IMPORTANT:
-    // - For debugging, we force Lax and non-secure to rule out Proxy/SSL mismatches.
-    // - This works on both HTTP and HTTPS (top-level navigation).
     // Relaxed for HTTP public IP access
-    sameSite: "lax",
+    // We explicitly leave sameSite undefined (defaults to permissive/Lax)
+    // and secure false to allow HTTP transport.
     secure: false,
   };
 }
