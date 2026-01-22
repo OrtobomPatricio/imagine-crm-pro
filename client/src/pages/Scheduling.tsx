@@ -120,6 +120,20 @@ export default function Scheduling() {
   const selectedDateKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
   const selectedDateAppointments = selectedDateKey ? appointmentsByDate[selectedDateKey] || [] : [];
 
+  const upcomingAppointments = useMemo(() => {
+    const now = new Date();
+    return appointments
+      .map((apt) => {
+        const date = new Date(apt.appointmentDate);
+        const [hour, minute] = apt.appointmentTime.split(":").map(Number);
+        date.setHours(hour, minute, 0, 0);
+        return { ...apt, scheduledAt: date };
+      })
+      .filter((apt) => apt.scheduledAt >= now)
+      .sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime())
+      .slice(0, 6);
+  }, [appointments]);
+
   const maxPerSlot = schedRules?.maxPerSlot ?? 6;
   const slotMinutes = schedRules?.slotMinutes ?? 15;
   const allowCustomTime = schedRules?.allowCustomTime ?? true;
@@ -311,10 +325,34 @@ export default function Scheduling() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {/* Upcoming appointments list (simplified) */}
-                <div className="text-sm text-muted-foreground">
-                  Selecciona un día en el calendario para ver detalles.
-                </div>
+                {upcomingAppointments.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">
+                    No hay citas próximas en la agenda.
+                  </div>
+                ) : (
+                  upcomingAppointments.map((apt) => {
+                    const reason = reasons.find((r) => r.id === apt.reasonId);
+                    return (
+                      <div key={apt.id} className="rounded-lg border p-3 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">{apt.firstName} {apt.lastName}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {format(apt.scheduledAt, "dd MMM, HH:mm", { locale: es })}
+                          </span>
+                        </div>
+                        <div className="text-xs text-muted-foreground">{apt.phone}</div>
+                        {reason && (
+                          <span
+                            className="inline-flex items-center px-2 py-1 rounded-full text-[10px]"
+                            style={{ backgroundColor: `${reason.color ?? '#3b82f6'}20`, color: reason.color ?? '#3b82f6' }}
+                          >
+                            {reason.name}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
               </div>
             </CardContent>
           </Card>

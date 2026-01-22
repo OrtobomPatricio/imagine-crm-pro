@@ -13,7 +13,7 @@ import { assertSafeOutboundUrl } from "./_core/urlSafety";
 import { encryptSecret, decryptSecret, maskSecret } from "./_core/crypto";
 import { sendCloudMessage } from "./whatsapp/cloud";
 import { dispatchIntegrationEvent } from "./_core/integrationDispatch";
-import { eq, desc, sql, and, count, asc } from "drizzle-orm";
+import { eq, desc, sql, and, count, asc, gte } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { nanoid } from "nanoid";
 import { sdk } from "./_core/sdk";
@@ -22,6 +22,7 @@ import { sendEmail, verifySmtpConnection } from "./_core/email";
 import { distributeConversation } from "./services/distribution";
 import { logAccess, getClientIp } from "./services/security";
 import { createBackup, validateBackupFile, leadsToCSV, parseCSV, importLeadsFromCSV } from "./services/backup";
+import { storagePut } from "./storage";
 
 export const appRouter = router({
   system: systemRouter,
@@ -666,6 +667,117 @@ export const appRouter = router({
     }),
   }),
 
+  analytics: router({
+    getOverview: permissionProcedure("analytics.view").query(async () => {
+      const db = await getDb();
+      if (!db) {
+        return {
+          leadStatusDistribution: [],
+          totalCommission: 0,
+        };
+      }
+
+      const leadStatusDistribution = await db.select({
+        status: leads.status,
+        count: count(),
+      }).from(leads).groupBy(leads.status);
+
+      const commissionTotal = await db.select({
+        total: sql<number>`SUM(${leads.commission})`,
+      }).from(leads);
+
+      return {
+        leadStatusDistribution,
+        totalCommission: commissionTotal[0]?.total ?? 0,
+      };
+    }),
+
+    getCommissionsByCountry: permissionProcedure("analytics.view").query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+
+      const rows = await db.select({
+        country: leads.country,
+        amount: sql<number>`SUM(${leads.commission})`,
+        leads: count(),
+      })
+        .from(leads)
+        .groupBy(leads.country)
+        .orderBy(desc(sql`SUM(${leads.commission})`));
+
+      return rows;
+    }),
+
+    getTeamRanking: permissionProcedure("analytics.view").query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+
+      const rows = await db.select({
+        userId: leads.assignedToId,
+        name: users.name,
+        sales: sql<number>`SUM(${leads.value})`,
+        deals: count(),
+      })
+        .from(leads)
+        .leftJoin(users, eq(leads.assignedToId, users.id))
+        .where(eq(leads.status, "won"))
+        .groupBy(leads.assignedToId, users.name)
+        .orderBy(desc(sql`SUM(${leads.value})`))
+        .limit(10);
+
+      return rows;
+    }),
+  }),
+
+  reports: router({
+    getOverview: permissionProcedure("reports.view").query(async () => {
+      const db = await getDb();
+      if (!db) {
+        return {
+          leadsEvolution: [],
+          campaignPerformance: [],
+          messagesByHour: [],
+        };
+      }
+
+      const leadsEvolution = await db.select({
+        date: sql<string>`DATE(${leads.createdAt})`,
+        leads: count(),
+      })
+        .from(leads)
+        .where(gte(leads.createdAt, sql`DATE_SUB(CURDATE(), INTERVAL 30 DAY)`))
+        .groupBy(sql`DATE(${leads.createdAt})`)
+        .orderBy(sql`DATE(${leads.createdAt})`);
+
+      const campaignPerformance = await db.select({
+        country: leads.country,
+        sent: sql<number>`SUM(CASE WHEN ${campaignRecipients.status} IN ('sent','delivered','read') THEN 1 ELSE 0 END)`,
+        delivered: sql<number>`SUM(CASE WHEN ${campaignRecipients.status} IN ('delivered','read') THEN 1 ELSE 0 END)`,
+        read: sql<number>`SUM(CASE WHEN ${campaignRecipients.status} = 'read' THEN 1 ELSE 0 END)`,
+      })
+        .from(campaignRecipients)
+        .innerJoin(leads, eq(campaignRecipients.leadId, leads.id))
+        .where(gte(campaignRecipients.createdAt, sql`DATE_SUB(CURDATE(), INTERVAL 7 DAY)`))
+        .groupBy(leads.country)
+        .orderBy(desc(sql`SUM(CASE WHEN ${campaignRecipients.status} IN ('sent','delivered','read') THEN 1 ELSE 0 END)`));
+
+      const messagesByHour = await db.select({
+        hour: sql<string>`DATE_FORMAT(${chatMessages.createdAt}, '%H:00')`,
+        messages: count(),
+      })
+        .from(chatMessages)
+        .where(gte(chatMessages.createdAt, sql`DATE_SUB(NOW(), INTERVAL 24 HOUR)`))
+        .groupBy(sql`DATE_FORMAT(${chatMessages.createdAt}, '%H:00')`)
+        .orderBy(sql`DATE_FORMAT(${chatMessages.createdAt}, '%H:00')`);
+
+      return {
+        leadsEvolution,
+        campaignPerformance,
+        messagesByHour,
+      };
+    }),
+  }),
+
   pipelines: router({
     list: permissionProcedure("kanban.view").query(async () => {
       const db = await getDb();
@@ -964,6 +1076,7 @@ export const appRouter = router({
     list: permissionProcedure("leads.view")
       .input(z.object({
         pipelineStageId: z.number().optional(),
+        searchTerm: z.string().optional(),
         limit: z.number().min(1).max(100).default(50),
         offset: z.number().min(0).default(0),
       }).optional())
@@ -977,10 +1090,43 @@ export const appRouter = router({
           query = query.where(eq(leads.pipelineStageId, input.pipelineStageId)) as typeof query;
         }
 
+        if (input?.searchTerm) {
+          const term = `%${input.searchTerm}%`;
+          query = query.where(
+            sql`(${leads.name} LIKE ${term} OR ${leads.phone} LIKE ${term} OR ${leads.email} LIKE ${term})`
+          ) as typeof query;
+        }
+
         return query
           .orderBy(desc(leads.createdAt))
           .limit(input?.limit ?? 50)
           .offset(input?.offset ?? 0);
+      }),
+
+    count: permissionProcedure("leads.view")
+      .input(z.object({
+        pipelineStageId: z.number().optional(),
+        searchTerm: z.string().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return 0;
+
+        let query = db.select({ total: count() }).from(leads);
+
+        if (input?.pipelineStageId) {
+          query = query.where(eq(leads.pipelineStageId, input.pipelineStageId)) as typeof query;
+        }
+
+        if (input?.searchTerm) {
+          const term = `%${input.searchTerm}%`;
+          query = query.where(
+            sql`(${leads.name} LIKE ${term} OR ${leads.phone} LIKE ${term} OR ${leads.email} LIKE ${term})`
+          ) as typeof query;
+        }
+
+        const result = await query;
+        return result[0]?.total ?? 0;
       }),
 
     getById: permissionProcedure("leads.view")
@@ -1013,6 +1159,15 @@ export const appRouter = router({
         const db = await getDb();
         if (!db) throw new Error("Database not available");
 
+        const normalizedPhone = input.phone.trim();
+        const existingLead = await db.select({ id: leads.id })
+          .from(leads)
+          .where(eq(leads.phone, normalizedPhone))
+          .limit(1);
+        if (existingLead[0]) {
+          throw new Error("Ya existe un lead con este teléfono.");
+        }
+
         // Calculate commission
         const commission = input.country.toLowerCase() === 'panamá' || input.country.toLowerCase() === 'panama'
           ? '10000.00'
@@ -1020,6 +1175,7 @@ export const appRouter = router({
 
         const result = await db.insert(leads).values({
           ...input,
+          phone: normalizedPhone,
           value: input.value ? input.value.toString() : "0.00",
           commission,
           assignedToId: ctx.user?.id,
@@ -1292,6 +1448,40 @@ export const appRouter = router({
         byCountry,
       };
     }),
+
+    getHistory: permissionProcedure("monitoring.view")
+      .input(z.object({
+        days: z.number().min(1).max(90).optional(),
+        whatsappNumberId: z.number().optional(),
+      }).optional())
+      .query(async ({ input }) => {
+        const db = await getDb();
+        if (!db) return [];
+
+        const days = input?.days ?? 14;
+        const filters = [
+          gte(messages.createdAt, sql`DATE_SUB(CURDATE(), INTERVAL ${days} DAY)`),
+        ];
+
+        if (input?.whatsappNumberId) {
+          filters.push(eq(messages.whatsappNumberId, input.whatsappNumberId));
+        }
+
+        const history = await db.select({
+          whatsappNumberId: messages.whatsappNumberId,
+          date: sql<string>`DATE(${messages.createdAt})`,
+          sent: sql<number>`SUM(CASE WHEN ${messages.status} IN ('sent','delivered','read') THEN 1 ELSE 0 END)`,
+          delivered: sql<number>`SUM(CASE WHEN ${messages.status} IN ('delivered','read') THEN 1 ELSE 0 END)`,
+          read: sql<number>`SUM(CASE WHEN ${messages.status} = 'read' THEN 1 ELSE 0 END)`,
+          failed: sql<number>`SUM(CASE WHEN ${messages.status} = 'failed' THEN 1 ELSE 0 END)`,
+        })
+          .from(messages)
+          .where(and(...filters))
+          .groupBy(messages.whatsappNumberId, sql`DATE(${messages.createdAt})`)
+          .orderBy(sql`DATE(${messages.createdAt})`);
+
+        return history;
+      }),
 
     updateCredentials: permissionProcedure("monitoring.manage")
       .input(z.object({
@@ -1775,6 +1965,21 @@ export const appRouter = router({
           .where(eq(conversations.id, input.conversationId));
 
         return { success: true };
+      }),
+
+    uploadMedia: permissionProcedure("chat.send")
+      .input(z.object({
+        conversationId: z.number(),
+        fileName: z.string().min(1),
+        contentType: z.string().min(1),
+        data: z.string().min(1), // base64
+      }))
+      .mutation(async ({ input }) => {
+        const safeName = input.fileName.replace(/[^a-zA-Z0-9.\-_]/g, "_");
+        const key = `chat/${input.conversationId}/${Date.now()}-${safeName}`;
+        const buffer = Buffer.from(input.data, "base64");
+        const result = await storagePut(key, buffer, input.contentType);
+        return { url: result.url, key: result.key };
       }),
 
     sendMessage: permissionProcedure("chat.send")

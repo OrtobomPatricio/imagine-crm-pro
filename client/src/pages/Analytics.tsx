@@ -17,16 +17,13 @@ import {
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
-import { useState } from "react";
 
 export default function Analytics() {
   const { data: dashboardStats } = trpc.dashboard.getStats.useQuery();
   const { data: numberStats } = trpc.whatsappNumbers.getStats.useQuery();
+  const { data: analyticsOverview } = trpc.analytics.getOverview.useQuery();
 
-  const totalCommission = (dashboardStats?.recentLeads ?? []).reduce((acc, lead: { commission?: string | null }) => {
-    return acc + parseFloat(lead.commission ?? '0');
-  }, 0);
-
+  const totalCommission = analyticsOverview?.totalCommission ?? 0;
 
   const searchParams = new URLSearchParams(window.location.search);
   const defaultTab = searchParams.get("tab") || "overview";
@@ -130,21 +127,26 @@ export default function Analytics() {
                 <CardContent>
                   <div className="space-y-4">
                     {[
-                      { status: 'Nuevos', count: 0, color: 'bg-blue-500' },
-                      { status: 'Contactados', count: 0, color: 'bg-yellow-500' },
-                      { status: 'Calificados', count: 0, color: 'bg-purple-500' },
-                      { status: 'Negociación', count: 0, color: 'bg-orange-500' },
-                      { status: 'Ganados', count: 0, color: 'bg-green-500' },
-                      { status: 'Perdidos', count: 0, color: 'bg-red-500' },
-                    ].map((item) => (
-                      <div key={item.status} className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-3 h-3 rounded-full ${item.color}`} />
-                          <span className="text-sm">{item.status}</span>
+                      { key: 'new', label: 'Nuevos', color: 'bg-blue-500' },
+                      { key: 'contacted', label: 'Contactados', color: 'bg-yellow-500' },
+                      { key: 'qualified', label: 'Calificados', color: 'bg-purple-500' },
+                      { key: 'negotiation', label: 'Negociación', color: 'bg-orange-500' },
+                      { key: 'won', label: 'Ganados', color: 'bg-green-500' },
+                      { key: 'lost', label: 'Perdidos', color: 'bg-red-500' },
+                    ].map((item) => {
+                      const countValue = analyticsOverview?.leadStatusDistribution?.find(
+                        (row: { status: string; count: number }) => row.status === item.key
+                      )?.count ?? 0;
+                      return (
+                        <div key={item.key} className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-3 h-3 rounded-full ${item.color}`} />
+                            <span className="text-sm">{item.label}</span>
+                          </div>
+                          <span className="font-semibold">{countValue}</span>
                         </div>
-                        <span className="font-semibold">{item.count}</span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </CardContent>
               </Card>
@@ -300,14 +302,10 @@ export default function Analytics() {
 }
 
 function CommissionsView() {
-  const { data: dashboardStats } = trpc.dashboard.getStats.useQuery();
-  // Mock detailed data breakdown by country
-  const commissionsByCountry = [
-    { country: "Paraguay", amount: 12500000, leads: 45 },
-    { country: "Bolivia", amount: 8400000, leads: 32 },
-    { country: "Panamá", amount: 15600000, leads: 28 },
-    { country: "Chile", amount: 11200000, leads: 21 },
-  ];
+  const { data: commissionsByCountry = [] } = trpc.analytics.getCommissionsByCountry.useQuery();
+  const total = commissionsByCountry.reduce((acc, item) => acc + (item.amount ?? 0), 0);
+  const topCountry = commissionsByCountry[0]?.country ?? "-";
+  const topShare = total > 0 ? Math.round(((commissionsByCountry[0]?.amount ?? 0) / total) * 100) : 0;
 
   return (
     <div className="grid gap-6 md:grid-cols-2">
@@ -318,22 +316,28 @@ function CommissionsView() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {commissionsByCountry.map((item) => (
-              <div key={item.country} className="flex items-center justify-between p-3 border rounded-lg">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 font-bold text-xs">
-                    {item.country.substring(0, 2).toUpperCase()}
-                  </div>
-                  <div>
-                    <div className="font-medium">{item.country}</div>
-                    <div className="text-xs text-muted-foreground">{item.leads} leads cerrados</div>
-                  </div>
-                </div>
-                <div className="font-bold text-green-600">
-                  {item.amount.toLocaleString()} G$
-                </div>
+            {commissionsByCountry.length === 0 ? (
+              <div className="text-center text-sm text-muted-foreground py-6">
+                No hay datos de comisiones todavía.
               </div>
-            ))}
+            ) : (
+              commissionsByCountry.map((item) => (
+                <div key={item.country} className="flex items-center justify-between p-3 border rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-600 font-bold text-xs">
+                      {item.country.substring(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="font-medium">{item.country}</div>
+                      <div className="text-xs text-muted-foreground">{item.leads} leads cerrados</div>
+                    </div>
+                  </div>
+                  <div className="font-bold text-green-600">
+                    {Math.round(item.amount ?? 0).toLocaleString()} G$
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </CardContent>
       </Card>
@@ -346,15 +350,17 @@ function CommissionsView() {
         <CardContent>
           <div className="flex flex-col items-center justify-center py-8">
             <div className="text-4xl font-bold text-primary mb-2">
-              47.700.000 G$
+              {Math.round(total).toLocaleString()} G$
             </div>
-            <p className="text-muted-foreground mb-6">Estimado al cierre de mes</p>
+            <p className="text-muted-foreground mb-6">
+              Principal país: {topCountry} ({topShare}%)
+            </p>
             <div className="w-full space-y-2">
               <div className="flex justify-between text-sm">
-                <span>Progreso (Día 22/30)</span>
-                <span>73%</span>
+                <span>Meta sobre comisión total</span>
+                <span>{Math.min(100, topShare)}%</span>
               </div>
-              <Progress value={73} className="h-2" />
+              <Progress value={Math.min(100, topShare)} className="h-2" />
             </div>
           </div>
         </CardContent>
@@ -364,8 +370,8 @@ function CommissionsView() {
 }
 
 function GoalsView() {
-  const { data: goals, isLoading } = trpc.goals.list.useQuery();
-  const [isNewGoalOpen, setIsNewGoalOpen] = useState(false);
+  const { data: goals } = trpc.goals.list.useQuery();
+  const { data: teamRanking = [] } = trpc.analytics.getTeamRanking.useQuery();
 
   // Mock data for display until DB is populated
   const displayGoals = goals && goals.length > 0 ? goals : [
@@ -424,26 +430,28 @@ function GoalsView() {
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {[
-              { name: "Ana Silva", sales: 18500000, deals: 12, rank: 1 },
-              { name: "Carlos Ruiz", sales: 15200000, deals: 10, rank: 2 },
-              { name: "Sofia Merez", sales: 12800000, deals: 8, rank: 3 },
-            ].map((agent) => (
-              <div key={agent.rank} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 font-bold text-primary">
-                    #{agent.rank}
-                  </div>
-                  <div>
-                    <div className="font-medium">{agent.name}</div>
-                    <div className="text-xs text-muted-foreground">{agent.deals} cierres</div>
-                  </div>
-                </div>
-                <div className="font-bold">
-                  {agent.sales.toLocaleString()} G$
-                </div>
+            {teamRanking.length === 0 ? (
+              <div className="text-sm text-muted-foreground text-center py-6">
+                Sin cierres registrados en el período.
               </div>
-            ))}
+            ) : (
+              teamRanking.map((agent, index) => (
+                <div key={agent.userId ?? index} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary/10 font-bold text-primary">
+                      #{index + 1}
+                    </div>
+                    <div>
+                      <div className="font-medium">{agent.name ?? "Sin nombre"}</div>
+                      <div className="text-xs text-muted-foreground">{agent.deals} cierres</div>
+                    </div>
+                  </div>
+                  <div className="font-bold">
+                    {Math.round(agent.sales ?? 0).toLocaleString()} G$
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </CardContent>
       </Card>
@@ -491,4 +499,3 @@ function AchievementsView() {
     </div>
   );
 }
-

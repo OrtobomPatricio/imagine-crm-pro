@@ -15,7 +15,7 @@ import {
   Plus,
   Search,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Table,
   TableBody,
@@ -99,6 +99,8 @@ function LeadsContent() {
   const [searchTerm, setSearchTerm] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("all");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const pageSize = 15;
   const [newLead, setNewLead] = useState({
     name: "",
     phone: "",
@@ -111,6 +113,13 @@ function LeadsContent() {
   const utils = trpc.useUtils();
   const { data: leads, isLoading } = trpc.leads.list.useQuery({
     pipelineStageId: stageFilter !== "all" ? Number(stageFilter) : undefined,
+    searchTerm: searchTerm.trim() ? searchTerm.trim() : undefined,
+    limit: pageSize,
+    offset: (page - 1) * pageSize,
+  });
+  const { data: totalLeadsCount = 0 } = trpc.leads.count.useQuery({
+    pipelineStageId: stageFilter !== "all" ? Number(stageFilter) : undefined,
+    searchTerm: searchTerm.trim() ? searchTerm.trim() : undefined,
   });
   const { data: pipelines } = trpc.pipelines.list.useQuery();
   const defaultPipeline = pipelines?.find(p => p.isDefault) || pipelines?.[0];
@@ -118,6 +127,10 @@ function LeadsContent() {
 
   const { data: customFieldDefs } = trpc.customFields.list.useQuery();
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, stageFilter]);
 
   const createLead = trpc.leads.create.useMutation({
     onSuccess: () => {
@@ -148,13 +161,18 @@ function LeadsContent() {
   });
 
   const handleCreateLead = () => {
-    if (!newLead.name || !newLead.phone || !newLead.country) {
+    const trimmedPhone = newLead.phone.replace(/\s+/g, "");
+    if (!newLead.name || !trimmedPhone || !newLead.country) {
       toast.error("Por favor completa los campos requeridos");
+      return;
+    }
+    if (!/^\+?\d[\d\s-]{6,}$/.test(trimmedPhone)) {
+      toast.error("El teléfono no tiene un formato válido");
       return;
     }
     createLead.mutate({
       name: newLead.name,
-      phone: newLead.phone,
+      phone: trimmedPhone,
       email: newLead.email || undefined,
       country: newLead.country,
       source: newLead.source || undefined,
@@ -164,12 +182,7 @@ function LeadsContent() {
   };
 
   const typedLeads = (leads ?? []) as Lead[];
-  const filteredLeads = typedLeads.filter(
-    (lead) =>
-      lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      lead.phone.includes(searchTerm) ||
-      (lead.email && lead.email.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const totalPages = Math.max(1, Math.ceil(totalLeadsCount / pageSize));
 
   const formatCommission = (commission: string | null) => {
     if (!commission) return "0 G$";
@@ -364,11 +377,11 @@ function LeadsContent() {
       <Card>
         <CardHeader>
           <CardTitle>Lista de Leads</CardTitle>
-          <CardDescription>{filteredLeads.length} leads encontrados</CardDescription>
+          <CardDescription>{totalLeadsCount} leads encontrados</CardDescription>
         </CardHeader>
 
         <CardContent>
-          {filteredLeads.length === 0 ? (
+          {typedLeads.length === 0 ? (
             <div className="text-center py-12">
               <p className="text-muted-foreground">No se encontraron leads</p>
             </div>
@@ -389,7 +402,7 @@ function LeadsContent() {
                 </TableHeader>
 
                 <TableBody>
-                  {filteredLeads.map((lead) => (
+                  {typedLeads.map((lead) => (
                     <TableRow key={lead.id}>
                       <TableCell className="font-medium">{lead.name}</TableCell>
 
@@ -484,6 +497,30 @@ function LeadsContent() {
           )}
         </CardContent>
       </Card>
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Página {page} de {totalPages}
+        </p>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+          >
+            Anterior
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+          >
+            Siguiente
+          </Button>
+        </div>
+      </div>
     </div >
   );
 }

@@ -268,8 +268,29 @@ class SDKServer {
     const signedInAt = new Date();
     let user = await db.getUserByOpenId(sessionUserId);
 
+    const dbInstance = await db.getDb();
+
     // If user not in DB, sync from OAuth server automatically
     if (!user) {
+      if (!dbInstance) {
+        return {
+          id: 0,
+          openId: sessionUserId,
+          name: session.name || "Dev User",
+          email: null,
+          password: null,
+          loginMethod: "dev",
+          role: "owner",
+          isActive: true,
+          hasSeenTour: true,
+          invitationToken: null,
+          invitationExpires: null,
+          createdAt: signedInAt,
+          updatedAt: signedInAt,
+          lastSignedIn: signedInAt,
+        } as User;
+      }
+
       // Logic for local users: Do NOT attempt OAuth sync, they must exist in DB
       if (sessionUserId.startsWith("local_")) {
         console.warn(`[Auth] Local user ${sessionUserId} not found in DB`);

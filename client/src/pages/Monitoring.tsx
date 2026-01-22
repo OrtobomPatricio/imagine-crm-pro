@@ -9,6 +9,7 @@ import {
   Wifi,
   WifiOff,
   AlertTriangle,
+  BarChart3,
   CheckCircle2,
   Clock,
   Plus,
@@ -21,7 +22,7 @@ import {
   Link2,
   Unlink
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +53,15 @@ import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useLocation } from "wouter";
 import { AMERICAS_COUNTRIES } from "@/_core/data/americasCountries";
+import {
+  AreaChart,
+  Area,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 type NumberStatus = 'active' | 'warming_up' | 'blocked' | 'disconnected';
 
@@ -69,6 +79,15 @@ interface WhatsAppNumber {
   isConnected: boolean;
   lastConnected: Date | null;
   createdAt: Date;
+}
+
+interface NumberHistoryPoint {
+  whatsappNumberId: number;
+  date: string;
+  sent: number;
+  delivered: number;
+  read: number;
+  failed: number;
 }
 
 const countries = AMERICAS_COUNTRIES;
@@ -100,6 +119,7 @@ export default function Monitoring() {
   const [, setLocation] = useLocation();
   const { data: numbers, isLoading, refetch } = trpc.whatsappNumbers.list.useQuery();
   const { data: stats } = trpc.whatsappNumbers.getStats.useQuery();
+  const { data: history } = trpc.whatsappNumbers.getHistory.useQuery({ days: 14 });
 
   const { data: recentMessages } = trpc.chat.getRecentMessages.useQuery(
     { limit: 50 },
@@ -221,6 +241,29 @@ export default function Monitoring() {
   }
 
   const typedNumbers = (numbers ?? []) as WhatsAppNumber[];
+  const historyPoints = (history ?? []) as NumberHistoryPoint[];
+  const [historyNumberId, setHistoryNumberId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!historyNumberId && typedNumbers.length > 0) {
+      setHistoryNumberId(typedNumbers[0].id);
+    }
+  }, [historyNumberId, typedNumbers]);
+
+  const filteredHistory = useMemo(
+    () => historyPoints.filter((point) => point.whatsappNumberId === historyNumberId),
+    [historyNumberId, historyPoints]
+  );
+  const historyTotals = useMemo(() => {
+    return filteredHistory.reduce(
+      (acc, point) => ({
+        sent: acc.sent + (point.sent ?? 0),
+        delivered: acc.delivered + (point.delivered ?? 0),
+        failed: acc.failed + (point.failed ?? 0),
+      }),
+      { sent: 0, delivered: 0, failed: 0 }
+    );
+  }, [filteredHistory]);
 
   return (
     <DashboardLayout>
@@ -331,8 +374,12 @@ export default function Monitoring() {
                     {generateQr.isPending ? (
                       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
                     ) : generateQr.data ? (
-                      <div className="text-xs text-muted-foreground p-4">
-                        <QrCode className="h-32 w-32 mx-auto mb-2 text-foreground" />
+                      <div className="text-center text-xs text-muted-foreground">
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(generateQr.data.qrCode)}`}
+                          alt="Código QR de conexión"
+                          className="h-40 w-40 mx-auto mb-2"
+                        />
                         <p>QR generado</p>
                         <p className="text-[10px]">Expira en 5 minutos</p>
                       </div>
@@ -538,6 +585,119 @@ export default function Monitoring() {
             );
           })}
         </div>
+
+        {/* Historical Metrics */}
+        <Card className="glass-card">
+          <CardHeader>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5 text-sky-400" />
+                  Historial de mensajes
+                </CardTitle>
+                <CardDescription>
+                  Últimos 14 días por número de WhatsApp
+                </CardDescription>
+              </div>
+              <div className="w-full md:w-72">
+                <Select
+                  value={historyNumberId ? String(historyNumberId) : ""}
+                  onValueChange={(value) => setHistoryNumberId(Number(value))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecciona un número" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {typedNumbers.map((number) => (
+                      <SelectItem key={number.id} value={String(number.id)}>
+                        {number.displayName || number.phoneNumber}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {filteredHistory.length === 0 ? (
+              <div className="text-center text-sm text-muted-foreground py-10">
+                Aún no hay historial para este número.
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="rounded-lg border bg-muted/40 p-4 text-center">
+                    <p className="text-xs text-muted-foreground">Enviados</p>
+                    <p className="text-2xl font-semibold text-sky-400">{historyTotals.sent}</p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/40 p-4 text-center">
+                    <p className="text-xs text-muted-foreground">Entregados</p>
+                    <p className="text-2xl font-semibold text-emerald-400">{historyTotals.delivered}</p>
+                  </div>
+                  <div className="rounded-lg border bg-muted/40 p-4 text-center">
+                    <p className="text-xs text-muted-foreground">Fallidos</p>
+                    <p className="text-2xl font-semibold text-rose-400">{historyTotals.failed}</p>
+                  </div>
+                </div>
+                <div className="h-[320px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={filteredHistory}>
+                      <defs>
+                        <linearGradient id="colorSent" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.4} />
+                          <stop offset="95%" stopColor="#38bdf8" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="colorDelivered" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#34d399" stopOpacity={0.35} />
+                          <stop offset="95%" stopColor="#34d399" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="colorFailed" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#fb7185" stopOpacity={0.35} />
+                          <stop offset="95%" stopColor="#fb7185" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
+                      <XAxis dataKey="date" stroke="rgba(255,255,255,0.5)" fontSize={12} />
+                      <YAxis stroke="rgba(255,255,255,0.5)" fontSize={12} />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "rgba(30, 41, 59, 0.95)",
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          borderRadius: "8px",
+                          color: "#fff",
+                        }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="sent"
+                        name="Enviados"
+                        stroke="#38bdf8"
+                        strokeWidth={2}
+                        fill="url(#colorSent)"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="delivered"
+                        name="Entregados"
+                        stroke="#34d399"
+                        strokeWidth={2}
+                        fill="url(#colorDelivered)"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="failed"
+                        name="Fallidos"
+                        stroke="#fb7185"
+                        strokeWidth={2}
+                        fill="url(#colorFailed)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Numbers Grid */}
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

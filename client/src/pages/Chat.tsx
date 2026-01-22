@@ -28,8 +28,7 @@ import {
   Check,
   CheckCheck,
   Clock,
-  Plus,
-  X
+  Plus
 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -77,7 +76,10 @@ export default function Chat() {
   const [newChatPhone, setNewChatPhone] = useState("");
   const [newChatName, setNewChatName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [pendingMediaType, setPendingMediaType] = useState<"image" | "video" | "document" | "audio" | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Allow deep-linking: /chat?conversationId=123&whatsappNumberId=1
   useEffect(() => {
@@ -131,6 +133,13 @@ export default function Chat() {
     },
   });
 
+  const uploadMedia = trpc.chat.uploadMedia.useMutation({
+    onError: (error) => {
+      toast.error("Error al subir archivo: " + error.message);
+      setIsUploading(false);
+    },
+  });
+
   const createConversation = trpc.chat.createConversation.useMutation({
     onSuccess: (data) => {
       toast.success("Conversación creada");
@@ -159,17 +168,34 @@ export default function Chat() {
 
   const handleSendMedia = (type: "image" | "video" | "document" | "audio") => {
     if (!selectedConversation || !selectedChannel) return;
-
-    // In a real implementation, this would open a file picker
-    toast.info(`Función de envío de ${type} - Próximamente`);
+    setPendingMediaType(type);
     setIsAttachmentOpen(false);
+    fileInputRef.current?.click();
   };
 
   const handleSendLocation = () => {
     if (!selectedConversation || !selectedChannel) return;
 
-    // In a real implementation, this would open a location picker
-    toast.info("Función de envío de ubicación - Próximamente");
+    if (!navigator.geolocation) {
+      toast.error("La geolocalización no está disponible en este navegador");
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        sendMessage.mutate({
+          conversationId: selectedConversation.id,
+          whatsappNumberId: selectedChannel,
+          messageType: "location",
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          locationName: "Ubicación compartida",
+        });
+      },
+      () => {
+        toast.error("No se pudo obtener la ubicación");
+      }
+    );
     setIsAttachmentOpen(false);
   };
 
@@ -188,6 +214,41 @@ export default function Chat() {
 
   const addEmoji = (emoji: string) => {
     setMessageText((prev) => prev + emoji);
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !pendingMediaType || !selectedConversation || !selectedChannel) return;
+
+    const arrayBuffer = await file.arrayBuffer();
+    const base64 = btoa(
+      new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
+    );
+
+    setIsUploading(true);
+    try {
+      const uploadResult = await uploadMedia.mutateAsync({
+        conversationId: selectedConversation.id,
+        fileName: file.name,
+        contentType: file.type || "application/octet-stream",
+        data: base64,
+      });
+
+      sendMessage.mutate({
+        conversationId: selectedConversation.id,
+        whatsappNumberId: selectedChannel,
+        messageType: pendingMediaType,
+        mediaUrl: uploadResult.url,
+        mediaName: file.name,
+        mediaMimeType: file.type,
+      });
+    } finally {
+      setIsUploading(false);
+      setPendingMediaType(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
   };
 
   const getStatusIcon = (status: string) => {
@@ -526,6 +587,21 @@ export default function Chat() {
                       </div>
                     </PopoverContent>
                   </Popover>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    accept={
+                      pendingMediaType === "image"
+                        ? "image/*"
+                        : pendingMediaType === "video"
+                          ? "video/*"
+                          : pendingMediaType === "audio"
+                            ? "audio/*"
+                            : undefined
+                    }
+                    onChange={handleFileChange}
+                  />
 
                   {/* Message input */}
                   <Input
@@ -553,7 +629,7 @@ export default function Chat() {
                   {/* Send button */}
                   <Button
                     onClick={handleSendMessage}
-                    disabled={!messageText.trim() || sendMessage.isPending}
+                    disabled={!messageText.trim() || sendMessage.isPending || isUploading}
                     className="bg-green-600 hover:bg-green-700"
                   >
                     <Send className="w-5 h-5" />

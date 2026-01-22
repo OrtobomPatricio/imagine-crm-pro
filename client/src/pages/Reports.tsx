@@ -17,42 +17,17 @@ import {
   Legend,
 } from "recharts";
 
-// Sample data for charts
-const leadsEvolutionData = [
-  { date: "01/01", leads: 45 },
-  { date: "05/01", leads: 78 },
-  { date: "10/01", leads: 95 },
-  { date: "15/01", leads: 120 },
-  { date: "20/01", leads: 165 },
-  { date: "25/01", leads: 210 },
-  { date: "30/01", leads: 298 },
-];
-
-const campaignPerformanceData = [
-  { country: "Bolivia", sent: 3500, delivered: 3200, read: 2800 },
-  { country: "Paraguay", sent: 2800, delivered: 2500, read: 2100 },
-  { country: "Panamá", sent: 3200, delivered: 3000, read: 2600 },
-  { country: "Chile", sent: 2500, delivered: 2300, read: 1900 },
-];
-
-const messagesByHourData = [
-  { hour: "00:00", messages: 95 },
-  { hour: "02:00", messages: 45 },
-  { hour: "04:00", messages: 30 },
-  { hour: "06:00", messages: 55 },
-  { hour: "08:00", messages: 120 },
-  { hour: "10:00", messages: 165 },
-  { hour: "12:00", messages: 180 },
-  { hour: "14:00", messages: 175 },
-  { hour: "16:00", messages: 160 },
-  { hour: "18:00", messages: 140 },
-  { hour: "20:00", messages: 125 },
-  { hour: "22:00", messages: 110 },
-  { hour: "24:00", messages: 95 },
-];
+type LeadEvolutionPoint = { date: string; leads: number };
+type CampaignPerformancePoint = { country: string; sent: number; delivered: number; read: number };
+type MessagesByHourPoint = { hour: string; messages: number };
 
 export default function Reports() {
   const { data: stats } = trpc.dashboard.getStats.useQuery();
+  const { data: reportData } = trpc.reports.getOverview.useQuery();
+
+  const leadsEvolutionData = (reportData?.leadsEvolution ?? []) as LeadEvolutionPoint[];
+  const campaignPerformanceData = (reportData?.campaignPerformance ?? []) as CampaignPerformancePoint[];
+  const messagesByHourData = (reportData?.messagesByHour ?? []) as MessagesByHourPoint[];
 
   return (
     <DashboardLayout>

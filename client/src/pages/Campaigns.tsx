@@ -37,11 +37,14 @@ import {
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useMemo, useState } from "react";
 
 export default function Campaigns() {
   const [, setLocation] = useLocation();
   const utils = trpc.useUtils();
   const { data: campaigns, isLoading } = trpc.campaigns.list.useQuery();
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const deleteCampaign = trpc.campaigns.delete.useMutation({
     onSuccess: () => {
@@ -89,6 +92,10 @@ export default function Campaigns() {
   const total = campaigns?.length || 0;
   const running = campaigns?.filter(c => c.status === 'running').length || 0;
   const completed = campaigns?.filter(c => c.status === 'completed').length || 0;
+  const filteredCampaigns = useMemo(() => {
+    if (statusFilter === "all") return campaigns ?? [];
+    return (campaigns ?? []).filter((campaign) => campaign.status === statusFilter);
+  }, [campaigns, statusFilter]);
 
   return (
     <DashboardLayout>
@@ -142,17 +149,36 @@ export default function Campaigns() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Historial</CardTitle>
-            <CardDescription>
-              Tus campañas recientes
-            </CardDescription>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <CardTitle>Historial</CardTitle>
+                <CardDescription>
+                  Tus campañas recientes
+                </CardDescription>
+              </div>
+              <div className="w-full sm:w-[200px]">
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Filtrar estado" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas</SelectItem>
+                    <SelectItem value="draft">Borrador</SelectItem>
+                    <SelectItem value="scheduled">Programada</SelectItem>
+                    <SelectItem value="running">En curso</SelectItem>
+                    <SelectItem value="completed">Completada</SelectItem>
+                    <SelectItem value="cancelled">Cancelada</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {isLoading ? (
               <div className="flex justify-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
-            ) : campaigns?.length === 0 ? (
+            ) : filteredCampaigns.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-20" />
                 <p>No tienes campañas creadas.</p>
@@ -166,12 +192,13 @@ export default function Campaigns() {
                     <TableHead>Tipo</TableHead>
                     <TableHead>Estado</TableHead>
                     <TableHead>Audiencia</TableHead>
+                    <TableHead>Resultados</TableHead>
                     <TableHead>Creada</TableHead>
                     <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {campaigns?.map((campaign) => (
+                  {filteredCampaigns.map((campaign) => (
                     <TableRow key={campaign.id}>
                       <TableCell className="font-medium">{campaign.name}</TableCell>
                       <TableCell>
@@ -184,6 +211,13 @@ export default function Campaigns() {
                         <div className="flex items-center gap-1 text-sm text-muted-foreground">
                           <Users className="h-3 w-3" />
                           {campaign.totalRecipients || '-'}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-xs text-muted-foreground space-y-1">
+                          <div>Enviados: {campaign.messagesSent ?? 0}</div>
+                          <div>Entregados: {campaign.messagesDelivered ?? 0}</div>
+                          <div>Fallidos: {campaign.messagesFailed ?? 0}</div>
                         </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{formatDate(campaign.createdAt)}</TableCell>

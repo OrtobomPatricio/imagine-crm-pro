@@ -37,6 +37,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // -- Tipos --
 type Lead = {
@@ -232,7 +233,23 @@ export default function KanbanBoard() {
               {activePipeline?.name || "Cargando..."}
             </p>
           </div>
-          {/* Pipeline Selector could go here */}
+          <div className="w-[240px]">
+            <Select
+              value={activePipelineId?.toString() ?? ""}
+              onValueChange={(value) => setActivePipelineId(Number(value))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecciona pipeline" />
+              </SelectTrigger>
+              <SelectContent>
+                {(pipelines ?? []).map((pipeline: { id: number; name: string }) => (
+                  <SelectItem key={pipeline.id} value={pipeline.id.toString()}>
+                    {pipeline.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <DndContext

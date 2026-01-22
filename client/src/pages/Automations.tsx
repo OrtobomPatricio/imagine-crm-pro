@@ -15,6 +15,16 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
     Table,
@@ -37,11 +47,13 @@ import {
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { toast } from "sonner";
+import { useState } from "react";
 
 export default function Automations() {
     const [, setLocation] = useLocation();
     const utils = trpc.useUtils();
     const { data: workflows, isLoading } = trpc.workflows.list.useQuery();
+    const [editingWorkflow, setEditingWorkflow] = useState<any>(null);
 
     const toggleWorkflow = trpc.workflows.toggle.useMutation({
         onSuccess: () => {
@@ -56,6 +68,15 @@ export default function Automations() {
             utils.workflows.list.invalidate();
             toast.success("Automatización eliminada");
         },
+    });
+
+    const updateWorkflow = trpc.workflows.update.useMutation({
+        onSuccess: () => {
+            utils.workflows.list.invalidate();
+            toast.success("Automatización actualizada");
+            setEditingWorkflow(null);
+        },
+        onError: (err) => toast.error(err.message),
     });
 
     const formatDate = (date: string | Date | null | undefined) => {
@@ -158,9 +179,9 @@ export default function Automations() {
                                                         </Button>
                                                     </DropdownMenuTrigger>
                                                     <DropdownMenuContent align="end">
-                                                        {/* <DropdownMenuItem onClick={() => setLocation(`/automations/${wf.id}`)}>
-                                <Edit className="mr-2 h-4 w-4" /> Editar
-                            </DropdownMenuItem> */}
+                                                        <DropdownMenuItem onClick={() => setEditingWorkflow(wf)}>
+                                                            <Edit className="mr-2 h-4 w-4" /> Editar
+                                                        </DropdownMenuItem>
                                                         <DropdownMenuItem className="text-red-600" onClick={() => deleteWorkflow.mutate({ id: wf.id })}>
                                                             <Trash2 className="mr-2 h-4 w-4" /> Eliminar
                                                         </DropdownMenuItem>
@@ -175,6 +196,50 @@ export default function Automations() {
                     </CardContent>
                 </Card>
             </div>
+
+            <Dialog open={!!editingWorkflow} onOpenChange={(open) => !open && setEditingWorkflow(null)}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Editar Automatización</DialogTitle>
+                        <DialogDescription>Actualiza el nombre y descripción de la regla.</DialogDescription>
+                    </DialogHeader>
+                    {editingWorkflow && (
+                        <div className="space-y-4 py-2">
+                            <div className="grid gap-2">
+                                <Label>Nombre</Label>
+                                <Input
+                                    value={editingWorkflow.name}
+                                    onChange={(e) => setEditingWorkflow((prev: any) => ({ ...prev, name: e.target.value }))}
+                                />
+                            </div>
+                            <div className="grid gap-2">
+                                <Label>Descripción</Label>
+                                <Input
+                                    value={editingWorkflow.description ?? ""}
+                                    onChange={(e) => setEditingWorkflow((prev: any) => ({ ...prev, description: e.target.value }))}
+                                />
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                                Disparador: {getTriggerLabel(editingWorkflow.triggerType)} · {((editingWorkflow.actions as any[])?.length || 0)} acciones
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <Button
+                            onClick={() =>
+                                updateWorkflow.mutate({
+                                    id: editingWorkflow.id,
+                                    name: editingWorkflow.name,
+                                    description: editingWorkflow.description,
+                                })
+                            }
+                            disabled={updateWorkflow.isPending || !editingWorkflow?.name}
+                        >
+                            {updateWorkflow.isPending ? "Guardando..." : "Guardar cambios"}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </DashboardLayout>
     );
 }
