@@ -727,6 +727,24 @@ export const appRouter = router({
 
       return rows;
     }),
+
+    getPerformance: permissionProcedure("analytics.view").query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+
+      // Last 30 days evolution
+      const rows = await db.select({
+        date: sql<string>`DATE_FORMAT(${leads.createdAt}, '%Y-%m-%d')`,
+        count: count(),
+        value: sql<number>`SUM(${leads.value})`,
+      })
+        .from(leads)
+        .where(gte(leads.createdAt, sql`DATE_SUB(CURDATE(), INTERVAL 30 DAY)`))
+        .groupBy(sql`DATE_FORMAT(${leads.createdAt}, '%Y-%m-%d')`)
+        .orderBy(asc(sql`DATE_FORMAT(${leads.createdAt}, '%Y-%m-%d')`));
+
+      return rows;
+    }),
   }),
 
   reports: router({

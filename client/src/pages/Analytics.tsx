@@ -112,176 +112,7 @@ export default function Analytics() {
             </div>
 
             {/* Charts Section */}
-            <div className="grid gap-6 md:grid-cols-2">
-              {/* Lead Status Distribution */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <PieChart className="h-5 w-5" />
-                    Distribución de Leads
-                  </CardTitle>
-                  <CardDescription>
-                    Por estado actual
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {[
-                      { key: 'new', label: 'Nuevos', color: 'bg-blue-500' },
-                      { key: 'contacted', label: 'Contactados', color: 'bg-yellow-500' },
-                      { key: 'qualified', label: 'Calificados', color: 'bg-purple-500' },
-                      { key: 'negotiation', label: 'Negociación', color: 'bg-orange-500' },
-                      { key: 'won', label: 'Ganados', color: 'bg-green-500' },
-                      { key: 'lost', label: 'Perdidos', color: 'bg-red-500' },
-                    ].map((item) => {
-                      const countValue = analyticsOverview?.leadStatusDistribution?.find(
-                        (row: { status: string; count: number }) => row.status === item.key
-                      )?.count ?? 0;
-                      return (
-                        <div key={item.key} className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-3 h-3 rounded-full ${item.color}`} />
-                            <span className="text-sm">{item.label}</span>
-                          </div>
-                          <span className="font-semibold">{countValue}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Numbers by Country */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5" />
-                    Números por País
-                  </CardTitle>
-                  <CardDescription>
-                    Distribución geográfica
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    {(numberStats?.byCountry ?? []).length === 0 ? (
-                      <p className="text-sm text-muted-foreground text-center py-4">
-                        No hay datos disponibles
-                      </p>
-                    ) : (
-                      (numberStats?.byCountry ?? []).map((country: { country: string; count: number }) => {
-                        const total = numberStats?.total ?? 1;
-                        const percentage = Math.round((country.count / total) * 100);
-                        return (
-                          <div key={country.country} className="space-y-2">
-                            <div className="flex items-center justify-between text-sm">
-                              <span>{country.country}</span>
-                              <span className="font-semibold">{country.count}</span>
-                            </div>
-                            <div className="h-2 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-primary rounded-full transition-all"
-                                style={{ width: `${percentage}%` }}
-                              />
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Number Status */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Phone className="h-5 w-5" />
-                    Estado de Números
-                  </CardTitle>
-                  <CardDescription>
-                    Distribución por estado
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-green-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-green-600">
-                        {dashboardStats?.activeNumbers ?? 0}
-                      </div>
-                      <p className="text-sm text-green-700">Activos</p>
-                    </div>
-                    <div className="bg-yellow-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-yellow-600">
-                        {dashboardStats?.warmingUpNumbers ?? 0}
-                      </div>
-                      <p className="text-sm text-yellow-700">Warm-up</p>
-                    </div>
-                    <div className="bg-red-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-red-600">
-                        {dashboardStats?.blockedNumbers ?? 0}
-                      </div>
-                      <p className="text-sm text-red-700">Bloqueados</p>
-                    </div>
-                    <div className="bg-gray-50 rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-gray-600">
-                        {(dashboardStats?.totalNumbers ?? 0) -
-                          (dashboardStats?.activeNumbers ?? 0) -
-                          (dashboardStats?.warmingUpNumbers ?? 0) -
-                          (dashboardStats?.blockedNumbers ?? 0)}
-                      </div>
-                      <p className="text-sm text-gray-700">Desconectados</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Performance Summary */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <TrendingUp className="h-5 w-5" />
-                    Resumen de Rendimiento
-                  </CardTitle>
-                  <CardDescription>
-                    Métricas clave del sistema
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <DollarSign className="h-4 w-4 text-green-500" />
-                        <span className="text-sm">Comisión Potencial Total</span>
-                      </div>
-                      <span className="font-semibold text-green-600">
-                        {totalCommission.toLocaleString()} G$
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <Users className="h-4 w-4 text-blue-500" />
-                        <span className="text-sm">Leads por Número</span>
-                      </div>
-                      <span className="font-semibold">
-                        {dashboardStats?.totalNumbers
-                          ? Math.round((dashboardStats?.totalLeads ?? 0) / dashboardStats.totalNumbers)
-                          : 0}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <MessageCircle className="h-4 w-4 text-purple-500" />
-                        <span className="text-sm">Capacidad de Mensajes/Día</span>
-                      </div>
-                      <span className="font-semibold">
-                        {((dashboardStats?.activeNumbers ?? 0) * 1000).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            <ReportsView />
           </TabsContent>
 
           <TabsContent value="commissions" className="pt-4">
@@ -298,6 +129,178 @@ export default function Analytics() {
         </Tabs>
       </div>
     </DashboardLayout>
+  );
+}
+
+function ReportsView() {
+  const { data: analyticsOverview } = trpc.analytics.getOverview.useQuery();
+  const { data: numberStats } = trpc.whatsappNumbers.getStats.useQuery();
+  const { data: performanceData } = trpc.analytics.getPerformance.useQuery();
+
+  return (
+    <div className="grid gap-6 md:grid-cols-2">
+      {/* Lead Status Distribution */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <PieChart className="h-5 w-5" />
+            Distribución de Leads
+          </CardTitle>
+          <CardDescription>
+            Por estado actual
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {[
+              { key: 'new', label: 'Nuevos', color: 'bg-blue-500' },
+              { key: 'contacted', label: 'Contactados', color: 'bg-yellow-500' },
+              { key: 'qualified', label: 'Calificados', color: 'bg-purple-500' },
+              { key: 'negotiation', label: 'Negociación', color: 'bg-orange-500' },
+              { key: 'won', label: 'Ganados', color: 'bg-green-500' },
+              { key: 'lost', label: 'Perdidos', color: 'bg-red-500' },
+            ].map((item) => {
+              const countValue = analyticsOverview?.leadStatusDistribution?.find(
+                (row: { status: string; count: number }) => row.status === item.key
+              )?.count ?? 0;
+              return (
+                <div key={item.key} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-3 h-3 rounded-full ${item.color}`} />
+                    <span className="text-sm">{item.label}</span>
+                  </div>
+                  <span className="font-semibold">{countValue}</span>
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Leads Evolution Chart */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />
+            Evolución de Leads
+          </CardTitle>
+          <CardDescription>
+            Últimos 30 días
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[200px] flex items-end justify-between gap-1 pt-4">
+            {(performanceData ?? []).length === 0 ? (
+              <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">No hay datos recientes</div>
+            ) : (
+              performanceData?.slice(-14).map((day: any) => {
+                const max = Math.max(...(performanceData?.map((p: any) => p.count) ?? [1]));
+                const height = Math.max(4, (day.count / max) * 100);
+                return (
+                  <div key={day.date} className="flex-1 flex flex-col items-center gap-1 group">
+                    <div className="w-full bg-primary/20 rounded-t-sm relative transition-all hover:bg-primary/40" style={{ height: `${height}%` }}>
+                      <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-md">
+                        {day.count} leads
+                        <div className="text-[10px] opacity-70">{day.date}</div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })
+            )}
+          </div>
+          <div className="flex justify-between mt-2 text-xs text-muted-foreground">
+            <span>Hace 14 días</span>
+            <span>Hoy</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Numbers by Country */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BarChart3 className="h-5 w-5" />
+            Números por País
+          </CardTitle>
+          <CardDescription>
+            Distribución geográfica
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {(numberStats?.countriesDistribution ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No hay datos disponibles
+              </p>
+            ) : (
+              (numberStats?.countriesDistribution ?? []).map((country: { country: string; count: number }) => {
+                const total = numberStats?.totalNumbers ?? 1;
+                const percentage = Math.round((country.count / total) * 100);
+                return (
+                  <div key={country.country} className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span>{country.country}</span>
+                      <span className="font-semibold">{country.count}</span>
+                    </div>
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all"
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Number Status */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Phone className="h-5 w-5" />
+            Estado de Números
+          </CardTitle>
+          <CardDescription>
+            Distribución por estado
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-green-50 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-green-600">
+                {numberStats?.activeNumbers ?? 0}
+              </div>
+              <p className="text-sm text-green-700">Activos</p>
+            </div>
+            <div className="bg-yellow-50 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-yellow-600">
+                {numberStats?.warmingUpNumbers ?? 0}
+              </div>
+              <p className="text-sm text-yellow-700">Warm-up</p>
+            </div>
+            <div className="bg-red-50 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-red-600">
+                {numberStats?.blockedNumbers ?? 0}
+              </div>
+              <p className="text-sm text-red-700">Bloqueados</p>
+            </div>
+            <div className="bg-gray-50 rounded-lg p-4 text-center">
+              <div className="text-2xl font-bold text-gray-600">
+                {(numberStats?.totalNumbers ?? 0) -
+                  (numberStats?.activeNumbers ?? 0) -
+                  (numberStats?.warmingUpNumbers ?? 0) -
+                  (numberStats?.blockedNumbers ?? 0)}
+              </div>
+              <p className="text-sm text-gray-700">Desconectados</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
