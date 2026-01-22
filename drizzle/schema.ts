@@ -577,5 +577,5 @@ export const achievements = mysqlTable('achievements', {
   metadata: json('metadata'),
 });
 
-export type Achievement = typeof achievements.;
-export type InsertAchievement = typeof achievements.;
+export type Achievement = typeof achievements.$inferSelect;
+export type InsertAchievement = typeof achievements.$inferInsert;
