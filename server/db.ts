@@ -11,7 +11,10 @@ export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
     try {
       // drizzle(mysql2) expects a mysql2 Pool/Connection, not a raw string
-      const pool = mysql.createPool(process.env.DATABASE_URL);
+      const pool = mysql.createPool({
+        uri: process.env.DATABASE_URL,
+        multipleStatements: true,
+      });
       _db = drizzle(pool as any);
     } catch (error) {
       console.warn("[Database] Failed to connect:", error);
